@@ -1,1 +1,91 @@
+html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <title>YNGUYEN MUSIC</title>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <header>
+
+    <div class="logo">
+      YNGUYEN MUSIC
+    </div>
+
+    <div class="search">
+
+      <input
+        id="searchInput"
+        type="text"
+        placeholder="Tim bai hat, ca si..."
+      >
+
+    </div>
+
+  </header>
+
+
+  <main>
+
+    <section class="hero">
+
+      <h1>
+        Kho nhac cua YNGUYEN
+      </h1>
+
+      <p>
+        Tim kiem va thuong thuc nhung bai hat yeu thich.
+      </p>
+
+    </section>
+
+
+    <section>
+
+      <h2>
+        Danh sach bai hat
+      </h2>
+
+      <div
+        id="musicList"
+        class="music-grid"
+      >
+        Dang tai nhac...
+      </div>
+
+    </section>
+
+  </main>
+
+
+  <div class="player">
+
+    <div class="now-playing">
+
+      <div id="nowTitle">
+        Chua chon bai hat
+      </div>
+
+      <div id="nowArtist"></div>
+
+    </div>
+
+
+    <audio
+      id="audioPlayer"
+      controls
+    ></audio>
+
+  </div>
+
+
+  <script src="app.js"></script>
+
+</body>
+</html>
