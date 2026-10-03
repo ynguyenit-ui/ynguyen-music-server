@@ -119,7 +119,7 @@ function playSong(index) {
 
     console.log(
         "URL:",
-        ⁨song.audio⁩
+        song.audio
     );
 
 
@@ -142,7 +142,7 @@ function playSong(index) {
     */
 
     audio.src =
-        ⁨song.audio⁩;
+        song.audio;
 
 
     audio.load();
@@ -159,7 +159,7 @@ function playSong(index) {
     */
 
     const promise =
-        ⁨audio.play⁩();
+        audio.play();
 
 
     if (promise !== undefined) {
@@ -214,7 +214,7 @@ playBtn.onclick = () => {
 
     if (audio.paused) {
 
-        ⁨audio.play⁩();
+        audio.play();
 
     } else {
 
