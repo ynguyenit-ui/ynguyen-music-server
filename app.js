@@ -338,19 +338,3 @@ audio.addEventListener(
 
 
 loadSongs();
-
-
-### 3. `songs.json` giữ nguyên
-
-json
-[
-  {
-    "id": "001",
-    "title": "Test Music",
-    "artist": "YNGUYEN",
-    "audio": "⁨https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3⁩",
-    "cover": "⁨https://picsum.photos/500/500?random=1⁩",
-    "genre": "Test"
-  }
-]
-
