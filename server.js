@@ -1074,7 +1074,260 @@ app.get(
 
 
     // ========================================================
-    // STEP 1 - LOCAL SEARCH
+    // STEP 1 - AUTO SCAN music/
+    // ========================================================
+
+    try {
+
+      const scannedTracks =
+        scanLocalMusic();
+
+
+      console.log(
+        "[AUTO LOCAL] Scanned:",
+        scannedTracks.length
+      );
+
+
+      let bestAutoTrack =
+        null;
+
+      let bestAutoScore =
+        0;
+
+
+      const wantedTitle =
+        normalize(song);
+
+      const wantedArtist =
+        normalize(artist);
+
+
+      for (
+        const track of
+        scannedTracks
+      ) {
+
+        const trackTitle =
+          normalize(
+            track.title
+          );
+
+        const trackArtist =
+          normalize(
+            track.artist
+          );
+
+
+        let score = 0;
+
+
+        // ----------------------------------------
+        // TITLE
+        // ----------------------------------------
+
+        score +=
+          similarity(
+            trackTitle,
+            wantedTitle
+          ) * 100;
+
+
+        score +=
+          wordOverlap(
+            trackTitle,
+            wantedTitle
+          ) * 50;
+
+
+        if (
+          containsWords(
+            trackTitle,
+            wantedTitle
+          )
+        ) {
+          score += 30;
+        }
+
+
+        // ----------------------------------------
+        // ARTIST
+        // ----------------------------------------
+
+        if (
+          wantedArtist &&
+          trackArtist
+        ) {
+
+          score +=
+            similarity(
+              trackArtist,
+              wantedArtist
+            ) * 30;
+
+
+          score +=
+            wordOverlap(
+              trackArtist,
+              wantedArtist
+            ) * 30;
+        }
+
+
+        console.log(
+          "[AUTO LOCAL SCORE]",
+          Math.round(score),
+          "-",
+          track.artist
+            ? `${track.artist} - ${track.title}`
+            : track.title
+        );
+
+
+        if (
+          score >
+          bestAutoScore
+        ) {
+
+          bestAutoScore =
+            score;
+
+          bestAutoTrack =
+            track;
+        }
+      }
+
+
+      // Ngưỡng giống tinh thần local fuzzy search cũ.
+      //
+      // Ke Say Tinh 2
+      // vs
+      // Kẻ Say Tình 2
+      //
+      // sẽ vượt xa ngưỡng này.
+
+      if (
+        bestAutoTrack &&
+        bestAutoScore >= 70
+      ) {
+
+        console.log(
+          "\n[AUTO LOCAL] MATCH"
+        );
+
+        console.log(
+          "Requested:",
+          song
+        );
+
+        console.log(
+          "Matched  :",
+          bestAutoTrack.title
+        );
+
+        console.log(
+          "Artist   :",
+          bestAutoTrack.artist
+        );
+
+        console.log(
+          "File     :",
+          bestAutoTrack.file
+        );
+
+        console.log(
+          "Score    :",
+          Math.round(
+            bestAutoScore
+          )
+        );
+
+
+        // Chuyển track của Auto Scan
+        // sang cấu trúc local mà phần /audio
+        // hiện tại đã hiểu.
+
+        const autoTrack = {
+
+          title:
+            bestAutoTrack.title,
+
+          artist:
+            bestAutoTrack.artist ||
+            artist ||
+            "",
+
+          source_file:
+            bestAutoTrack.file,
+
+          file:
+            bestAutoTrack.file,
+
+          path:
+            bestAutoTrack.file,
+
+          duration:
+            0,
+
+          provider:
+            "local",
+
+          score:
+            Math.round(
+              bestAutoScore
+            )
+        };
+
+
+        const token =
+          createToken(
+            autoTrack
+          );
+
+
+        const musicItem =
+          makeMusicItem(
+            autoTrack,
+            token
+          );
+
+
+        console.log(
+          "[DB-ROBOT RESPONSE]"
+        );
+
+        console.log(
+          JSON.stringify(
+            musicItem
+          )
+        );
+
+
+        return res.json(
+          musicItem
+        );
+      }
+
+
+      console.log(
+        "[AUTO LOCAL] NOT FOUND"
+      );
+
+
+    } catch (err) {
+
+      // Scanner lỗi cũng KHÔNG làm hỏng server.
+      // Ta tiếp tục xuống catalog cũ.
+
+      console.error(
+        "[AUTO LOCAL ERROR]",
+        err
+      );
+    }
+
+
+    // ========================================================
+    // STEP 2 - OLD catalog.json LOCAL SEARCH
     // ========================================================
 
     const localTrack =
@@ -1087,7 +1340,7 @@ app.get(
     if (localTrack) {
 
       console.log(
-        "[LOCAL] MATCH"
+        "[CATALOG LOCAL] MATCH"
       );
 
       console.log(
@@ -1137,12 +1390,12 @@ app.get(
 
 
     console.log(
-      "[LOCAL] NOT FOUND"
+      "[CATALOG LOCAL] NOT FOUND"
     );
 
 
     // ========================================================
-    // STEP 2 - AUDIUS SEARCH
+    // STEP 3 - AUDIUS SEARCH
     // ========================================================
 
     try {
@@ -1219,6 +1472,75 @@ app.get(
       }
 
 
+      // ======================================================
+      // SAFETY THRESHOLD
+      //
+      // Không cho Audius phát kết quả quá yếu.
+      //
+      // Test của chúng ta:
+      //
+      // Lạc Trôi   = rất cao -> PASS
+      // Bắc Bling  = kết quả rác -> REJECT
+      // ======================================================
+
+      const MIN_AUDIUS_SCORE =
+        220;
+
+
+      if (
+        Number(
+          onlineTrack.score || 0
+        ) <
+        MIN_AUDIUS_SCORE
+      ) {
+
+        console.log(
+          "\n[AUDIUS] REJECT LOW SCORE"
+        );
+
+        console.log(
+          "Requested:",
+          song
+        );
+
+        console.log(
+          "Candidate:",
+          onlineTrack.title
+        );
+
+        console.log(
+          "Artist   :",
+          onlineTrack.artist
+        );
+
+        console.log(
+          "Score    :",
+          onlineTrack.score
+        );
+
+        console.log(
+          "Minimum  :",
+          MIN_AUDIUS_SCORE
+        );
+
+
+        return res
+          .status(404)
+          .json({
+            error:
+              "Song not found",
+
+            reason:
+              "Audius match score too low",
+
+            title:
+              song,
+
+            artist
+          });
+      }
+
+
       console.log(
         "\n[AUDIUS] MATCH"
       );
@@ -1245,15 +1567,19 @@ app.get(
 
 
       // ======================================================
-      // SAVE ALTERNATIVES FOR AUTO FALLBACK
-      //
-      // #1 = onlineTrack
-      // #2 -> #5 = alternatives
+      // SAVE ONLY GOOD ALTERNATIVES
       // ======================================================
 
       const alternatives =
         rankedTracks
           .slice(1, 5)
+          .filter(
+            track =>
+              Number(
+                track.score || 0
+              ) >=
+              MIN_AUDIUS_SCORE
+          )
           .map(
             track => ({
               id:
@@ -1340,8 +1666,6 @@ app.get(
     }
   }
 );
-
-
 // ============================================================
 // AUDIO TOKEN
 //
