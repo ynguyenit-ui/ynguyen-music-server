@@ -2559,7 +2559,264 @@ app.get(
   }
 );
 
+// ============================================================
+// V5.4 TEST - JAMENDO SEARCH ONLY
+//
+// Test:
+// /test-jamendo-search?song=Lac%20Troi&artist=Son%20Tung
+// ============================================================
 
+app.get(
+  "/test-jamendo-search",
+  async (req, res) => {
+
+    const song =
+      String(
+        req.query.song || ""
+      ).trim();
+
+    const artist =
+      String(
+        req.query.artist || ""
+      ).trim();
+
+
+    if (!song) {
+      return res
+        .status(400)
+        .json({
+          error: "Missing song"
+        });
+    }
+
+
+    const clientId =
+      process.env.JAMENDO_CLIENT_ID || "";
+
+
+    if (!clientId) {
+
+      console.error(
+        "[JAMENDO] JAMENDO_CLIENT_ID missing"
+      );
+
+      return res
+        .status(500)
+        .json({
+          error:
+            "JAMENDO_CLIENT_ID is not configured"
+        });
+    }
+
+
+    const query =
+      [song, artist]
+        .filter(Boolean)
+        .join(" ");
+
+
+    console.log(
+      "\n===================================="
+    );
+
+    console.log(
+      "[JAMENDO TEST SEARCH]"
+    );
+
+    console.log(
+      "Song   :",
+      song
+    );
+
+    console.log(
+      "Artist :",
+      artist
+    );
+
+    console.log(
+      "Query  :",
+      query
+    );
+
+
+    try {
+
+      const params =
+        new URLSearchParams({
+          client_id:
+            clientId,
+
+          format:
+            "json",
+
+          limit:
+            "20",
+
+          search:
+            query,
+
+          audioformat:
+            "mp32"
+        });
+
+
+      const jamendoUrl =
+        `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`;
+
+
+      const response =
+        await fetch(
+          jamendoUrl,
+          {
+            headers: {
+              Accept:
+                "application/json",
+
+              "User-Agent":
+                "YN-Music-Server/5.4-TEST"
+            }
+          }
+        );
+
+
+      console.log(
+        "[JAMENDO SEARCH] HTTP:",
+        response.status
+      );
+
+
+      const text =
+        await response.text();
+
+
+      if (!response.ok) {
+
+        console.error(
+          "[JAMENDO SEARCH] HTTP ERROR:",
+          text.slice(0, 500)
+        );
+
+
+        return res
+          .status(502)
+          .json({
+            error:
+              "Jamendo HTTP error",
+
+            status:
+              response.status
+          });
+      }
+
+
+      let data;
+
+
+      try {
+
+        data =
+          JSON.parse(text);
+
+      } catch (err) {
+
+        console.error(
+          "[JAMENDO SEARCH] Invalid JSON"
+        );
+
+
+        return res
+          .status(502)
+          .json({
+            error:
+              "Jamendo returned invalid JSON"
+          });
+      }
+
+
+      const results =
+        Array.isArray(
+          data.results
+        )
+          ? data.results
+          : [];
+
+
+      console.log(
+        "[JAMENDO SEARCH] API status:",
+        data.headers?.status
+      );
+
+      console.log(
+        "[JAMENDO SEARCH] Results:",
+        results.length
+      );
+
+
+      const tracks =
+        results.map(
+          track => ({
+            id:
+              track.id || "",
+
+            title:
+              track.name || "",
+
+            artist:
+              track.artist_name || "",
+
+            album:
+              track.album_name || "",
+
+            duration:
+              Number(
+                track.duration || 0
+              ),
+
+            audio:
+              track.audio || "",
+
+            shareurl:
+              track.shareurl || ""
+          })
+        );
+
+
+      return res.json({
+        provider:
+          "jamendo",
+
+        query,
+
+        count:
+          tracks.length,
+
+        api_status:
+          data.headers?.status,
+
+        api_error:
+          data.headers?.error_message || "",
+
+        tracks
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        "[JAMENDO SEARCH ERROR]",
+        err
+      );
+
+
+      return res
+        .status(500)
+        .json({
+          error:
+            String(err)
+        });
+    }
+  }
+);
 // ============================================================
 // TOKEN CLEANUP
 // ============================================================
@@ -2612,7 +2869,9 @@ console.log(
 console.log(
   "[ROUTE] /test-online-search registered"
 );
-
+console.log(
+  "[ROUTE] /test-jamendo-search registered"
+);
 
 // ============================================================
 // START SERVER
