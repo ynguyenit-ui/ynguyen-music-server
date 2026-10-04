@@ -2584,7 +2584,7 @@ app.listen(
   () => {
 
     console.log(
-      `YN Music Server V5.3 running on port ${PORT}`
+      `YN Music Server V5.3.1 running on port ${PORT}`
     );
 
 
