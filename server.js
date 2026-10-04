@@ -2818,6 +2818,405 @@ app.get(
   }
 );
 // ============================================================
+// V5.4A TEST - AUDIUS MULTI SEARCH
+//
+// Test:
+// /test-audius-multisearch?song=Lac%20Troi&artist=Son%20Tung%20M-TP
+// ============================================================
+
+app.get("/test-audius-multisearch", async (req, res) => {
+
+  const song = String(req.query.song || "").trim();
+  const artist = String(req.query.artist || "").trim();
+
+  if (!song) {
+    return res.status(400).json({
+      error: "Missing song"
+    });
+  }
+
+  // Tạo nhiều cách tìm khác nhau
+  const queries = [
+    `${song} ${artist}`,
+    `${normalize(song)} ${normalize(artist)}`,
+    song,
+    normalize(song),
+    artist ? `${artist} ${song}` : "",
+    artist
+      ? `${normalize(artist)} ${normalize(song)}`
+      : ""
+  ]
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  // Loại query trùng
+  const uniqueQueries = [
+    ...new Map(
+      queries.map(q => [
+        normalize(q),
+        q
+      ])
+    ).values()
+  ];
+
+  console.log(
+    "\n===================================="
+  );
+
+  console.log(
+    "[AUDIUS MULTI SEARCH]"
+  );
+
+  console.log(
+    "Song   :",
+    song
+  );
+
+  console.log(
+    "Artist :",
+    artist
+  );
+
+  console.log(
+    "Queries:",
+    uniqueQueries
+  );
+
+  try {
+
+    const allTracks = [];
+
+    for (const query of uniqueQueries) {
+
+      console.log(
+        "[AUDIUS MULTI] Searching:",
+        query
+      );
+
+      const params =
+        new URLSearchParams({
+          query,
+          limit: "20",
+          offset: "0",
+          sort_method: "relevant"
+        });
+
+      const url =
+        `https://api.audius.co/v1/tracks/search?${params.toString()}`;
+
+      const response =
+        await fetch(url, {
+          headers: {
+            Accept:
+              "application/json",
+
+            "User-Agent":
+              "YN-Music-Server/5.4A-TEST"
+          }
+        });
+
+      console.log(
+        "[AUDIUS MULTI] HTTP:",
+        response.status
+      );
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data =
+        await response.json();
+
+      const results =
+        Array.isArray(data.data)
+          ? data.data
+          : [];
+
+      console.log(
+        "[AUDIUS MULTI] Found:",
+        results.length
+      );
+
+      for (const track of results) {
+
+        allTracks.push({
+          id:
+            track.id || "",
+
+          title:
+            track.title || "",
+
+          artist:
+            track.user?.name ||
+            track.user?.handle ||
+            "",
+
+          duration:
+            Number(
+              track.duration || 0
+            ),
+
+          genre:
+            track.genre || "",
+
+          query_found:
+            query
+        });
+      }
+    }
+
+
+    // ----------------------------------------
+    // REMOVE DUPLICATES BY TRACK ID
+    // ----------------------------------------
+
+    const trackMap =
+      new Map();
+
+    for (const track of allTracks) {
+
+      if (!track.id) {
+        continue;
+      }
+
+      if (!trackMap.has(track.id)) {
+
+        trackMap.set(
+          track.id,
+          {
+            ...track,
+            found_count: 1,
+            found_queries: [
+              track.query_found
+            ]
+          }
+        );
+
+      } else {
+
+        const existing =
+          trackMap.get(track.id);
+
+        existing.found_count++;
+
+        if (
+          !existing.found_queries.includes(
+            track.query_found
+          )
+        ) {
+          existing.found_queries.push(
+            track.query_found
+          );
+        }
+      }
+    }
+
+
+    const uniqueTracks =
+      [...trackMap.values()];
+
+
+    // ----------------------------------------
+    // SCORE
+    // ----------------------------------------
+
+    const ranked =
+      uniqueTracks.map(track => {
+
+        const title =
+          normalize(track.title);
+
+        const uploader =
+          normalize(track.artist);
+
+        const wantedSong =
+          normalize(song);
+
+        const wantedArtist =
+          normalize(artist);
+
+
+        let score = 0;
+
+
+        // Title similarity
+        score +=
+          similarity(
+            title,
+            wantedSong
+          ) * 100;
+
+
+        // Song word overlap
+        score +=
+          wordOverlap(
+            title,
+            wantedSong
+          ) * 100;
+
+
+        // Full song words inside title
+        if (
+          containsWords(
+            title,
+            wantedSong
+          )
+        ) {
+          score += 100;
+        }
+
+
+        // Artist
+        if (wantedArtist) {
+
+          score +=
+            wordOverlap(
+              title,
+              wantedArtist
+            ) * 80;
+
+          score +=
+            similarity(
+              uploader,
+              wantedArtist
+            ) * 30;
+
+          if (
+            containsWords(
+              title,
+              wantedArtist
+            )
+          ) {
+            score += 80;
+          }
+        }
+
+
+        // Track xuất hiện ở nhiều query
+        score +=
+          Math.min(
+            track.found_count * 15,
+            75
+          );
+
+
+        // Penalize remix / cover etc.
+        const combined =
+          `${title} ${uploader}`;
+
+        for (
+          const bad of
+          UNWANTED_VERSIONS
+        ) {
+
+          if (
+            combined.includes(
+              normalize(bad)
+            ) &&
+            !normalize(
+              `${song} ${artist}`
+            ).includes(
+              normalize(bad)
+            )
+          ) {
+            score -= 50;
+          }
+        }
+
+
+        // Track quá ngắn
+        if (
+          track.duration > 0 &&
+          track.duration < 60
+        ) {
+          score -= 60;
+        }
+
+
+        return {
+          ...track,
+
+          score:
+            Math.round(score)
+        };
+      });
+
+
+    ranked.sort(
+      (a, b) =>
+        b.score - a.score
+    );
+
+
+    console.log(
+      "[AUDIUS MULTI] Unique tracks:",
+      ranked.length
+    );
+
+
+    console.log(
+      "[AUDIUS MULTI] TOP 5:"
+    );
+
+
+    ranked
+      .slice(0, 5)
+      .forEach(
+        (track, index) => {
+
+          console.log(
+            `#${index + 1}`,
+            track.score,
+            track.title,
+            "-",
+            track.artist,
+            `(found ${track.found_count}x)`
+          );
+        }
+      );
+
+
+    return res.json({
+
+      version:
+        "5.4A-test",
+
+      song,
+
+      artist,
+
+      queries:
+        uniqueQueries,
+
+      raw_results:
+        allTracks.length,
+
+      unique_results:
+        ranked.length,
+
+      top:
+        ranked.slice(0, 20)
+
+    });
+
+
+  } catch (err) {
+
+    console.error(
+      "[AUDIUS MULTI ERROR]",
+      err
+    );
+
+
+    return res
+      .status(500)
+      .json({
+        error:
+          String(err)
+      });
+  }
+});
+// ============================================================
 // TOKEN CLEANUP
 // ============================================================
 
@@ -2872,7 +3271,9 @@ console.log(
 console.log(
   "[ROUTE] /test-jamendo-search registered"
 );
-
+console.log(
+  "[ROUTE] /test-audius-multisearch registered"
+);
 // ============================================================
 // START SERVER
 // ============================================================
