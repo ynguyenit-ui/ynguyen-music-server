@@ -318,13 +318,25 @@ function streamLocalTrack(track, req, res) {
     }
   });
 
-  ffmpeg.on("close", code => {
-    console.log("[FFMPEG] exited:", code);
+ ffmpeg.on("close", (code, signal) => {
+  console.log(
+    "[FFMPEG AUDIUS] CLOSE",
+    "code =", code,
+    "signal =", signal
+  );
 
-    if (!res.writableEnded) {
-      res.end();
-    }
-  });
+  if (!res.writableEnded) {
+    res.end();
+  }
+});
+
+ffmpeg.on("exit", (code, signal) => {
+  console.log(
+    "[FFMPEG AUDIUS] EXIT",
+    "code =", code,
+    "signal =", signal
+  );
+});
 
 }
 
@@ -495,7 +507,10 @@ app.get("/test-audius-play/:trackId", (req, res) => {
       ]
     }
   );
-
+console.log(
+  "[FFMPEG AUDIUS] PID:",
+  ffmpeg.pid
+);
   let started = false;
 
   ffmpeg.stdout.on("data", () => {
@@ -529,17 +544,25 @@ app.get("/test-audius-play/:trackId", (req, res) => {
     }
   });
 
-  ffmpeg.on("close", code => {
-    console.log(
-      "[FFMPEG AUDIUS] exited:",
-      code
-    );
+  ffmpeg.on("close", (code, signal) => {
+  console.log(
+    "[FFMPEG AUDIUS] CLOSE",
+    "code =", code,
+    "signal =", signal
+  );
 
-    if (!res.writableEnded) {
-      res.end();
-    }
-  });
+  if (!res.writableEnded) {
+    res.end();
+  }
+});
 
+ffmpeg.on("exit", (code, signal) => {
+  console.log(
+    "[FFMPEG AUDIUS] EXIT",
+    "code =", code,
+    "signal =", signal
+  );
+});
 
 });
 console.log("[ROUTE] /test-audius-play/:trackId registered");
