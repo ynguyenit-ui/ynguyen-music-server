@@ -556,6 +556,7 @@ app.get("/test-audius-play/:trackId", (req, res) => {
     }
   });
 });
+console.log("[ROUTE] /test-audius-play/:trackId registered");
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `YN Music Server V5 LOCAL running on port ${PORT}`
