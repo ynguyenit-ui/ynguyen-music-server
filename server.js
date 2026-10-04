@@ -791,7 +791,7 @@ app.get(
         "YN Music Server",
 
       version:
-        "5.3",
+        "5.3.1",
 
       status:
         "online",
@@ -1523,18 +1523,227 @@ function streamLocalTrack(
 // ============================================================
 
 async function probeAudiusTrack(track, timeoutMs = 10000) {
-  const sourceUrl =
-    `https://api.audius.co/v1/tracks/${encodeURIComponent(track.id)}/stream`;
+    } catch (err) {
+      console.error(
+        "[AUDIUS PIPE ERROR]",
+        err
+      );
 
-  const controller = new AbortController();
+      if (
+        !ffmpeg.stdin.destroyed
+      ) {
+        ffmpeg.stdin.destroy();
+      }
+    }
 
-  const timer = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  } catch (err) {
+    console.error(
+      "[AUDIUS AUDIO ERROR]",
+      err
+    );
 
-  console.log(
-    `[AUDIUS FALLBACK] Probe: ${track.title} (${track.id})`
-  );
+    if (!res.headersSent) {
+      return res
+        .status(502)
+        .send(
+          "Audius audio error"
+        );
+    }
+
+    res.end();
+  }
+}
+
+
+// ============================================================
+// TEST ONLINE SEARCH
+//
+// Browser:
+// /test-online-search?song=Lac%20Troi&artist=Son%20Tung
+// ============================================================
+
+app.get(
+  "/test-online-search",
+  async (req, res) => {
+
+    const song =
+      String(
+        req.query.song ||
+        ""
+      ).trim();
+
+
+    const artist =
+      String(
+        req.query.artist ||
+        ""
+      ).trim();
+
+
+    if (!song) {
+
+      return res
+        .status(400)
+        .json({
+          error:
+            "Missing song"
+        });
+    }
+
+
+    try {
+
+      const results =
+        await searchAudius(
+          song,
+          artist
+        );
+
+
+      const ranked =
+        chooseAudiusTracks(
+          results,
+          song,
+          artist
+        );
+
+
+      return res.json({
+        query:
+          [song, artist]
+            .filter(Boolean)
+            .join(" "),
+
+        count:
+          ranked.length,
+
+        tracks:
+          ranked.map(
+            track => ({
+              id:
+                track.id,
+
+              title:
+                track.title,
+
+              artist:
+                track.artist,
+
+              duration:
+                track.duration,
+
+              genre:
+                track.genre,
+
+              score:
+                track.score
+            })
+          )
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        "[ONLINE SEARCH TEST ERROR]",
+        err
+      );
+
+
+      return res
+        .status(500)
+        .json({
+          error:
+            String(err)
+        });
+    }
+  }
+);
+
+
+// ============================================================
+// TOKEN CLEANUP
+// ============================================================
+
+setInterval(
+  () => {
+
+    const now =
+      Date.now();
+
+
+    for (
+      const [
+        token,
+        track
+      ]
+      of resolvedTracks
+    ) {
+
+      if (
+        now -
+        track.createdAt >
+        60 * 60 * 1000
+      ) {
+
+        resolvedTracks.delete(
+          token
+        );
+      }
+    }
+
+  },
+
+  10 * 60 * 1000
+);
+
+
+// ============================================================
+// ROUTES READY
+// ============================================================
+
+console.log(
+  "[ROUTE] /stream_pcm registered"
+);
+
+console.log(
+  "[ROUTE] /audio/:token.mp3 registered"
+);
+
+console.log(
+  "[ROUTE] /test-online-search registered"
+);
+
+
+// ============================================================
+// START SERVER
+// ============================================================
+
+app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+
+    console.log(
+      `YN Music Server V5.3.1 running on port ${PORT}`
+    );
+
+
+    console.log(
+      `[CATALOG] ${catalog.length} local tracks ready`
+    );
+
+
+    console.log(
+      "[SEARCH] Local -> Audius Smart Ranking"
+    );
+
+
+    console.log(
+      "[AUDIO] Node fetch -> FFmpeg stdin enabled"
+    );
+  }
+);
 
   try {
     const response = await fetch(
