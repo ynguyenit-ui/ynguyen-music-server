@@ -540,15 +540,7 @@ app.get("/test-audius-play/:trackId", (req, res) => {
     }
   });
 
-  res.on("close", () => {
-    if (!ffmpeg.killed) {
-      console.log(
-        "[FFMPEG AUDIUS] Client disconnected"
-      );
 
-      ffmpeg.kill("SIGKILL");
-    }
-  });
 });
 console.log("[ROUTE] /test-audius-play/:trackId registered");
 app.listen(PORT, "0.0.0.0", () => {
