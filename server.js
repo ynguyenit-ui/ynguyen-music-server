@@ -447,6 +447,115 @@ app.get("/test-online-search", async (req, res) => {
     });
   }
 });
+// ============================================================
+// V5.1 - AUDIUS STREAM TEST
+// ============================================================
+
+app.get("/test-audius-play/:trackId", (req, res) => {
+  const trackId = req.params.trackId;
+
+  const sourceUrl =
+    `https://api.audius.co/v1/tracks/${encodeURIComponent(trackId)}/stream`;
+
+  console.log("\n====================================");
+  console.log("[AUDIUS PLAY TEST]");
+  console.log("Track ID :", trackId);
+  console.log("Source   :", sourceUrl);
+  console.log("UA       :", req.headers["user-agent"] || "");
+  console.log("Range    :", req.headers.range || "none");
+  console.log("====================================");
+
+  res.status(200);
+  res.setHeader("Content-Type", "audio/mpeg");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+
+  const args = [
+    "-hide_banner",
+    "-loglevel", "error",
+
+    "-i", sourceUrl,
+
+    "-vn",
+
+    // DB-ROBOT format đã test thành công
+    "-ac", "1",
+    "-ar", "24000",
+    "-b:a", "32k",
+    "-codec:a", "libmp3lame",
+
+    "-f", "mp3",
+    "pipe:1"
+  ];
+
+  console.log("[FFMPEG AUDIUS] Starting...");
+
+  const ffmpeg = spawn(
+    ffmpegPath,
+    args,
+    {
+      stdio: [
+        "ignore",
+        "pipe",
+        "pipe"
+      ]
+    }
+  );
+
+  let started = false;
+
+  ffmpeg.stdout.on("data", () => {
+    if (!started) {
+      started = true;
+      console.log(
+        "[FFMPEG AUDIUS] Audio stream started"
+      );
+    }
+  });
+
+  ffmpeg.stdout.pipe(res);
+
+  ffmpeg.stderr.on("data", data => {
+    console.error(
+      "[FFMPEG AUDIUS]",
+      data.toString().trim()
+    );
+  });
+
+  ffmpeg.on("error", err => {
+    console.error(
+      "[FFMPEG AUDIUS ERROR]",
+      err
+    );
+
+    if (!res.headersSent) {
+      res.status(500).end();
+    } else {
+      res.end();
+    }
+  });
+
+  ffmpeg.on("close", code => {
+    console.log(
+      "[FFMPEG AUDIUS] exited:",
+      code
+    );
+
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
+  res.on("close", () => {
+    if (!ffmpeg.killed) {
+      console.log(
+        "[FFMPEG AUDIUS] Client disconnected"
+      );
+
+      ffmpeg.kill("SIGKILL");
+    }
+  });
+});
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `YN Music Server V5 LOCAL running on port ${PORT}`
