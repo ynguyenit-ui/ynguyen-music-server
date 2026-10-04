@@ -144,12 +144,7 @@ app.get("/stream_pcm", (req, res) => {
     });
   }
 
-  const base =
-  process.env.PUBLIC_URL ||
-  "https://ynguyen-music-server.onrender.com";
-
-  const audioURL =
-    `${base}/audio/test.mp3`;
+const audioURL = "/audio/test.mp3";
 
   //
   // Quan trọng:
