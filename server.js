@@ -1,6 +1,7 @@
 import express from "express";
 
 const app = express();
+app.set("trust proxy", true);
 const PORT = process.env.PORT || 3000;
 
 const TEST_MP3 =
@@ -144,7 +145,8 @@ app.get("/stream_pcm", (req, res) => {
   }
 
   const base =
-    `${req.protocol}://${req.get("host")}`;
+  process.env.PUBLIC_URL ||
+  "https://ynguyen-music-server.onrender.com";
 
   const audioURL =
     `${base}/audio/test.mp3`;
