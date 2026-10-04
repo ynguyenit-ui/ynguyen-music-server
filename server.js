@@ -351,7 +351,102 @@ setInterval(() => {
 // ============================================================
 // START
 // ============================================================
+// ============================================================
+// V5.1 - AUDIUS ONLINE SEARCH TEST
+// ============================================================
 
+app.get("/test-online-search", async (req, res) => {
+  const song = String(req.query.song || "").trim();
+  const artist = String(req.query.artist || "").trim();
+
+  if (!song) {
+    return res.status(400).json({
+      error: "Missing song"
+    });
+  }
+
+  const query = [song, artist]
+    .filter(Boolean)
+    .join(" ");
+
+  console.log("\n====================================");
+  console.log("[ONLINE SEARCH TEST]");
+  console.log("Query:", query);
+  console.log("====================================");
+
+  try {
+    const api =
+      "https://api.audius.co/v1/tracks/search" +
+      "?query=" +
+      encodeURIComponent(query) +
+      "&limit=10";
+
+    const response = await fetch(api, {
+      headers: {
+        "Accept": "application/json",
+        "User-Agent": "YN-Music-Server/5.1"
+      }
+    });
+
+    console.log(
+      "[AUDIUS] HTTP:",
+      response.status
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+
+      console.log(
+        "[AUDIUS ERROR]",
+        body
+      );
+
+      return res.status(502).json({
+        error: "Audius search failed",
+        status: response.status
+      });
+    }
+
+    const json = await response.json();
+
+    const tracks = (json.data || []).map(track => ({
+      id: track.id,
+      title: track.title,
+      artist:
+        track.user?.name ||
+        track.user?.handle ||
+        "",
+      duration: track.duration || 0,
+      genre: track.genre || ""
+    }));
+
+    console.log(
+      `[AUDIUS] Found ${tracks.length} tracks`
+    );
+
+    for (const track of tracks) {
+      console.log(
+        `[AUDIUS] ${track.title} - ${track.artist} (${track.id})`
+      );
+    }
+
+    return res.json({
+      query,
+      count: tracks.length,
+      tracks
+    });
+
+  } catch (err) {
+    console.error(
+      "[AUDIUS ERROR]",
+      err
+    );
+
+    return res.status(500).json({
+      error: String(err)
+    });
+  }
+});
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
     `YN Music Server V5 LOCAL running on port ${PORT}`
