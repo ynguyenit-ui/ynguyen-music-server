@@ -326,12 +326,6 @@ function streamLocalTrack(track, req, res) {
     }
   });
 
-  res.on("close", () => {
-    if (!ffmpeg.killed) {
-      console.log("[FFMPEG] Client disconnected");
-      ffmpeg.kill("SIGKILL");
-    }
-  });
 }
 
 // ============================================================
