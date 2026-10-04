@@ -1662,6 +1662,751 @@ app.get(
 
 
 // ============================================================
+// ============================================================
+// V5.4 TEST - JAMENDO
+//
+// Search:
+// /test-jamendo-search?song=Lac%20Troi&artist=Son%20Tung
+//
+// Play:
+// /test-jamendo-play/TRACK_ID
+// ============================================================
+
+const JAMENDO_CLIENT_ID =
+  process.env.JAMENDO_CLIENT_ID || "";
+
+
+// ============================================================
+// JAMENDO SEARCH
+// ============================================================
+
+app.get(
+  "/test-jamendo-search",
+  async (req, res) => {
+
+    const song =
+      String(
+        req.query.song || ""
+      ).trim();
+
+    const artist =
+      String(
+        req.query.artist || ""
+      ).trim();
+
+
+    if (!song) {
+      return res
+        .status(400)
+        .json({
+          error: "Missing song"
+        });
+    }
+
+
+    if (!JAMENDO_CLIENT_ID) {
+      return res
+        .status(500)
+        .json({
+          error:
+            "JAMENDO_CLIENT_ID is not configured"
+        });
+    }
+
+
+    const query =
+      [song, artist]
+        .filter(Boolean)
+        .join(" ");
+
+
+    console.log(
+      "\n===================================="
+    );
+
+    console.log(
+      "[JAMENDO TEST SEARCH]"
+    );
+
+    console.log(
+      "Song   :",
+      song
+    );
+
+    console.log(
+      "Artist :",
+      artist
+    );
+
+    console.log(
+      "Query  :",
+      query
+    );
+
+
+    try {
+
+      const params =
+        new URLSearchParams({
+          client_id:
+            JAMENDO_CLIENT_ID,
+
+          format:
+            "json",
+
+          limit:
+            "20",
+
+          search:
+            query,
+
+          audioformat:
+            "mp32"
+        });
+
+
+      const url =
+        `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`;
+
+
+      const response =
+        await fetch(
+          url,
+          {
+            headers: {
+              Accept:
+                "application/json",
+
+              "User-Agent":
+                "YN-Music-Server/5.4-TEST"
+            }
+          }
+        );
+
+
+      console.log(
+        "[JAMENDO SEARCH] HTTP:",
+        response.status
+      );
+
+
+      if (!response.ok) {
+
+        const body =
+          await response.text();
+
+        console.error(
+          "[JAMENDO SEARCH] FAILED:",
+          body
+        );
+
+
+        return res
+          .status(502)
+          .json({
+            error:
+              "Jamendo HTTP error",
+
+            status:
+              response.status,
+
+            body:
+              body.slice(0, 500)
+          });
+      }
+
+
+      const data =
+        await response.json();
+
+
+      const headers =
+        data.headers || {};
+
+
+      console.log(
+        "[JAMENDO SEARCH] Status:",
+        headers.status
+      );
+
+      console.log(
+        "[JAMENDO SEARCH] Results:",
+        Array.isArray(data.results)
+          ? data.results.length
+          : 0
+      );
+
+
+      const tracks =
+        Array.isArray(data.results)
+          ? data.results.map(
+              track => ({
+
+                id:
+                  track.id,
+
+                title:
+                  track.name,
+
+                artist:
+                  track.artist_name,
+
+                album:
+                  track.album_name,
+
+                duration:
+                  Number(
+                    track.duration || 0
+                  ),
+
+                audio:
+                  track.audio || "",
+
+                audiodownload:
+                  track.audiodownload || "",
+
+                image:
+                  track.image || "",
+
+                shareurl:
+                  track.shareurl || ""
+              })
+            )
+          : [];
+
+
+      return res.json({
+
+        provider:
+          "jamendo",
+
+        query,
+
+        count:
+          tracks.length,
+
+        headers,
+
+        tracks
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        "[JAMENDO SEARCH ERROR]",
+        err
+      );
+
+
+      return res
+        .status(500)
+        .json({
+          error:
+            String(err)
+        });
+    }
+  }
+);
+
+
+// ============================================================
+// JAMENDO PLAY TEST
+//
+// Browser:
+// /test-jamendo-play/TRACK_ID
+//
+// This route:
+// Jamendo -> Node fetch -> FFmpeg -> browser
+// ============================================================
+
+app.get(
+  "/test-jamendo-play/:id",
+  async (req, res) => {
+
+    const trackId =
+      String(
+        req.params.id || ""
+      ).trim();
+
+
+    if (!trackId) {
+      return res
+        .status(400)
+        .send(
+          "Missing Jamendo track ID"
+        );
+    }
+
+
+    if (!JAMENDO_CLIENT_ID) {
+      return res
+        .status(500)
+        .send(
+          "JAMENDO_CLIENT_ID is not configured"
+        );
+    }
+
+
+    console.log(
+      "\n===================================="
+    );
+
+    console.log(
+      "[JAMENDO TEST PLAY]"
+    );
+
+    console.log(
+      "Track ID:",
+      trackId
+    );
+
+
+    try {
+
+      // ------------------------------------------------------
+      // 1. GET TRACK INFO
+      // ------------------------------------------------------
+
+      const params =
+        new URLSearchParams({
+          client_id:
+            JAMENDO_CLIENT_ID,
+
+          format:
+            "json",
+
+          id:
+            trackId,
+
+          audioformat:
+            "mp32"
+        });
+
+
+      const infoUrl =
+        `https://api.jamendo.com/v3.0/tracks/?${params.toString()}`;
+
+
+      const infoResponse =
+        await fetch(
+          infoUrl,
+          {
+            headers: {
+              Accept:
+                "application/json",
+
+              "User-Agent":
+                "YN-Music-Server/5.4-TEST"
+            }
+          }
+        );
+
+
+      console.log(
+        "[JAMENDO INFO] HTTP:",
+        infoResponse.status
+      );
+
+
+      if (!infoResponse.ok) {
+        return res
+          .status(502)
+          .send(
+            "Jamendo track info failed"
+          );
+      }
+
+
+      const info =
+        await infoResponse.json();
+
+
+      const track =
+        Array.isArray(info.results)
+          ? info.results[0]
+          : null;
+
+
+      if (!track) {
+
+        console.log(
+          "[JAMENDO INFO] Track not found"
+        );
+
+
+        return res
+          .status(404)
+          .send(
+            "Jamendo track not found"
+          );
+      }
+
+
+      const audioUrl =
+        String(
+          track.audio || ""
+        );
+
+
+      if (!audioUrl) {
+
+        console.log(
+          "[JAMENDO INFO] No audio URL"
+        );
+
+
+        return res
+          .status(404)
+          .send(
+            "Jamendo audio URL missing"
+          );
+      }
+
+
+      console.log(
+        "[JAMENDO INFO] Title :",
+        track.name
+      );
+
+      console.log(
+        "[JAMENDO INFO] Artist:",
+        track.artist_name
+      );
+
+      console.log(
+        "[JAMENDO INFO] Audio :",
+        audioUrl
+      );
+
+
+      // ------------------------------------------------------
+      // 2. NODE FETCHES JAMENDO AUDIO
+      // ------------------------------------------------------
+
+      const controller =
+        new AbortController();
+
+
+      const timer =
+        setTimeout(
+          () => controller.abort(),
+          15000
+        );
+
+
+      const upstream =
+        await fetch(
+          audioUrl,
+          {
+            redirect:
+              "follow",
+
+            headers: {
+              Accept:
+                "*/*",
+
+              "User-Agent":
+                "YN-Music-Server/5.4-TEST"
+            },
+
+            signal:
+              controller.signal
+          }
+        );
+
+
+      clearTimeout(
+        timer
+      );
+
+
+      console.log(
+        "[JAMENDO AUDIO] HTTP:",
+        upstream.status
+      );
+
+      console.log(
+        "[JAMENDO AUDIO] Type:",
+        upstream.headers.get(
+          "content-type"
+        )
+      );
+
+      console.log(
+        "[JAMENDO AUDIO] Length:",
+        upstream.headers.get(
+          "content-length"
+        )
+      );
+
+
+      if (
+        !upstream.ok ||
+        !upstream.body
+      ) {
+
+        return res
+          .status(502)
+          .send(
+            "Jamendo audio fetch failed"
+          );
+      }
+
+
+      // ------------------------------------------------------
+      // 3. RESPONSE
+      // ------------------------------------------------------
+
+      res.status(200);
+
+      res.setHeader(
+        "Content-Type",
+        "audio/mpeg"
+      );
+
+      res.setHeader(
+        "Cache-Control",
+        "no-cache"
+      );
+
+
+      // ------------------------------------------------------
+      // 4. FFMPEG
+      //
+      // Same DB-ROBOT format:
+      // mono / 24 kHz / 32 kbps MP3
+      // ------------------------------------------------------
+
+      const args = [
+
+        "-hide_banner",
+
+        "-loglevel",
+        "error",
+
+        "-i",
+        "pipe:0",
+
+        "-vn",
+
+        "-ac",
+        "1",
+
+        "-ar",
+        "24000",
+
+        "-b:a",
+        "32k",
+
+        "-codec:a",
+        "libmp3lame",
+
+        "-f",
+        "mp3",
+
+        "pipe:1"
+      ];
+
+
+      console.log(
+        "[FFMPEG JAMENDO] Starting via stdin..."
+      );
+
+
+      const ffmpeg =
+        spawn(
+          ffmpegPath,
+          args,
+          {
+            stdio: [
+              "pipe",
+              "pipe",
+              "pipe"
+            ]
+          }
+        );
+
+
+      console.log(
+        "[FFMPEG JAMENDO] PID:",
+        ffmpeg.pid
+      );
+
+
+      let audioStarted =
+        false;
+
+
+      ffmpeg.stdout.on(
+        "data",
+        () => {
+
+          if (!audioStarted) {
+
+            audioStarted =
+              true;
+
+            console.log(
+              "[FFMPEG JAMENDO] Audio stream started"
+            );
+          }
+        }
+      );
+
+
+      ffmpeg.stdout.pipe(
+        res
+      );
+
+
+      ffmpeg.stderr.on(
+        "data",
+        data => {
+
+          console.error(
+            "[FFMPEG JAMENDO STDERR]",
+            data
+              .toString()
+              .trim()
+          );
+        }
+      );
+
+
+      ffmpeg.on(
+        "error",
+        err => {
+
+          console.error(
+            "[FFMPEG JAMENDO ERROR]",
+            err
+          );
+        }
+      );
+
+
+      ffmpeg.on(
+        "close",
+        (
+          code,
+          signal
+        ) => {
+
+          console.log(
+            "[FFMPEG JAMENDO] CLOSE",
+            "code =",
+            code,
+            "signal =",
+            signal
+          );
+
+
+          if (
+            !res.writableEnded
+          ) {
+            res.end();
+          }
+        }
+      );
+
+
+      // ------------------------------------------------------
+      // 5. JAMENDO BODY -> FFMPEG STDIN
+      // ------------------------------------------------------
+
+      const reader =
+        upstream.body.getReader();
+
+
+      try {
+
+        while (true) {
+
+          const {
+            done,
+            value
+          } =
+            await reader.read();
+
+
+          if (done) {
+
+            console.log(
+              "[JAMENDO AUDIO] Stream finished"
+            );
+
+            ffmpeg.stdin.end();
+
+            break;
+          }
+
+
+          const buffer =
+            Buffer.from(
+              value
+            );
+
+
+          const writable =
+            ffmpeg.stdin.write(
+              buffer
+            );
+
+
+          if (!writable) {
+
+            await new Promise(
+              resolve => {
+
+                ffmpeg.stdin.once(
+                  "drain",
+                  resolve
+                );
+              }
+            );
+          }
+        }
+
+
+      } catch (err) {
+
+        console.error(
+          "[JAMENDO PIPE ERROR]",
+          err
+        );
+
+
+        if (
+          !ffmpeg.stdin.destroyed
+        ) {
+          ffmpeg.stdin.destroy();
+        }
+      }
+
+
+    } catch (err) {
+
+      console.error(
+        "[JAMENDO PLAY ERROR]",
+        err
+      );
+
+
+      if (!res.headersSent) {
+
+        return res
+          .status(500)
+          .send(
+            String(err)
+          );
+      }
+
+
+      res.end();
+    }
+  }
+);
 // TOKEN CLEANUP
 // ============================================================
 
