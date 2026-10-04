@@ -2,6 +2,7 @@ import express from "express";
 import { spawn } from "child_process";
 import ffmpegPath from "ffmpeg-static";
 import fs from "fs";
+import path from "path";
 import crypto from "crypto";
 
 const app = express();
@@ -22,12 +23,11 @@ try {
 
   console.log(`[CATALOG] Loaded ${catalog.length} tracks`);
 } catch (err) {
-  console.error("[CATALOG] Load error:", err);
+  console.error("[CATALOG ERROR]", err);
 }
 
-
 // ============================================================
-// HELPERS
+// NORMALIZE VIETNAMESE
 // ============================================================
 
 function normalize(text = "") {
@@ -42,33 +42,34 @@ function normalize(text = "") {
     .trim();
 }
 
+// ============================================================
+// SEARCH
+// ============================================================
 
 function scoreTrack(track, song, artist) {
-  const tTitle = normalize(track.title);
-  const tArtist = normalize(track.artist);
-
-  const qTitle = normalize(song);
+  const qSong = normalize(song);
   const qArtist = normalize(artist);
+
+  const title = normalize(track.title);
+  const trackArtist = normalize(track.artist);
 
   let score = 0;
 
-  // Title
-  if (tTitle === qTitle) {
+  if (title === qSong) {
     score += 100;
   } else if (
-    tTitle.includes(qTitle) ||
-    qTitle.includes(tTitle)
+    title.includes(qSong) ||
+    qSong.includes(title)
   ) {
     score += 50;
   }
 
-  // Artist
-  if (qArtist) {
-    if (tArtist === qArtist) {
+  if (qArtist && trackArtist) {
+    if (trackArtist === qArtist) {
       score += 50;
     } else if (
-      tArtist.includes(qArtist) ||
-      qArtist.includes(tArtist)
+      trackArtist.includes(qArtist) ||
+      qArtist.includes(trackArtist)
     ) {
       score += 25;
     }
@@ -76,7 +77,6 @@ function scoreTrack(track, song, artist) {
 
   return score;
 }
-
 
 function findTrack(song, artist) {
   let best = null;
@@ -86,13 +86,12 @@ function findTrack(song, artist) {
     const score = scoreTrack(track, song, artist);
 
     if (score > bestScore) {
-      bestScore = score;
       best = track;
+      bestScore = score;
     }
   }
 
-  // Tránh match quá lỏng
-  if (bestScore < 50) {
+  if (!best || bestScore < 50) {
     return null;
   }
 
@@ -102,14 +101,13 @@ function findTrack(song, artist) {
   };
 }
 
-
 // ============================================================
-// TEMP TRACK CACHE
+// TOKEN CACHE
 // ============================================================
 
 const resolvedTracks = new Map();
 
-function createTrackToken(track) {
+function createToken(track) {
   const token = crypto.randomBytes(8).toString("hex");
 
   resolvedTracks.set(token, {
@@ -120,52 +118,45 @@ function createTrackToken(track) {
   return token;
 }
 
-
 // ============================================================
-// HOME
+// STATUS
 // ============================================================
 
 app.get("/", (req, res) => {
   res.json({
     name: "YN Music Server",
-    version: "5.0.0",
+    version: "5.0-local",
     status: "online",
     tracks: catalog.length,
     audio: {
       codec: "MP3",
-      sample_rate: 24000,
       channels: 1,
+      sample_rate: 24000,
       bitrate: "32k"
     }
   });
 });
 
-
 // ============================================================
-// DB-ROBOT MUSIC SEARCH
+// DB-ROBOT SEARCH
 // ============================================================
 
-app.get("/stream_pcm", async (req, res) => {
-  const song = (req.query.song || "").trim();
+app.get("/stream_pcm", (req, res) => {
+  const song = String(req.query.song || "").trim();
 
-  const artist = (
+  const artist = String(
     req.query.artist ||
     req.query.singer ||
     ""
   ).trim();
-
-  const directPlay = req.query.url === "true";
-
-  const ua = req.headers["user-agent"] || "";
 
   console.log("\n====================================");
   console.log("[DB-ROBOT REQUEST]");
   console.log("Song   :", song);
   console.log("Artist :", artist);
   console.log("url    :", req.query.url || "");
-  console.log("UA     :", ua);
+  console.log("UA     :", req.headers["user-agent"] || "");
   console.log("====================================");
-
 
   if (!song) {
     return res.status(400).json({
@@ -173,15 +164,12 @@ app.get("/stream_pcm", async (req, res) => {
     });
   }
 
-
-  // ----------------------------------------------------------
-  // SEARCH
-  // ----------------------------------------------------------
-
   const track = findTrack(song, artist);
 
   if (!track) {
-    console.log("[SEARCH] NOT FOUND:", song, artist);
+    console.log("[SEARCH] NOT FOUND");
+    console.log("Song:", song);
+    console.log("Artist:", artist);
 
     return res.status(404).json({
       error: "Song not found",
@@ -190,65 +178,40 @@ app.get("/stream_pcm", async (req, res) => {
     });
   }
 
-
   console.log("[SEARCH] MATCH");
-  console.log("Requested:", song, "-", artist);
-  console.log("Found    :", track.title, "-", track.artist);
-  console.log("Score    :", track.score);
+  console.log(
+    `${song} -> ${track.title} (score ${track.score})`
+  );
 
+  const token = createToken(track);
 
-  // ----------------------------------------------------------
-  // CREATE TEMP AUDIO TOKEN
-  // ----------------------------------------------------------
-
-  const token = createTrackToken(track);
-
+  // DB-Robot requires relative audio URL.
   const audioPath = `/audio/${token}.mp3`;
-
-
-  // ----------------------------------------------------------
-  // ORIGINAL MEOW STYLE RESPONSE
-  // ----------------------------------------------------------
 
   const musicItem = {
     title: track.title,
-    artist: track.artist,
-
-    // IMPORTANT:
-    // relative URL is required by DB-ROBOT
+    artist: track.artist || artist,
     audio_url: audioPath,
     audio_full_url: audioPath,
-
     m3u8_url: "",
     lyric_url: "",
     cover_url: "",
-
     duration: track.duration || 0,
     from_cache: false,
     ip: ""
   };
 
-
   console.log("[DB-ROBOT RESPONSE]");
   console.log(JSON.stringify(musicItem));
 
-
-  // Normal DB-Robot request
-  if (!directPlay) {
-    return res.json(musicItem);
-  }
-
-
-  // Optional compatibility with ?url=true
-  return streamTrack(track, req, res);
+  res.json(musicItem);
 });
 
-
 // ============================================================
-// AUDIO ENDPOINT
+// AUDIO
 // ============================================================
 
-app.get("/audio/:token.mp3", async (req, res) => {
+app.get("/audio/:token.mp3", (req, res) => {
   const token = req.params.token;
 
   const track = resolvedTracks.get(token);
@@ -260,69 +223,49 @@ app.get("/audio/:token.mp3", async (req, res) => {
   console.log("Range :", req.headers.range || "none");
   console.log("====================================");
 
-
   if (!track) {
-    console.log("[AUDIO] Invalid/expired token");
-
+    console.log("[AUDIO] Unknown token");
     return res.status(404).send("Track not found");
   }
 
-
-  console.log(
-    "[AUDIO] Playing:",
-    track.title,
-    "-",
-    track.artist
-  );
-
-  return streamTrack(track, req, res);
+  streamLocalTrack(track, req, res);
 });
 
-
 // ============================================================
-// FFMPEG → DB-ROBOT FORMAT
+// LOCAL MP3 -> FFMPEG -> ROBOT
 // ============================================================
 
-function streamTrack(track, req, res) {
-  if (!track.source_url) {
-    return res.status(500).send(
-      "Track has no source_url"
-    );
+function streamLocalTrack(track, req, res) {
+  if (!track.source_file) {
+    console.error("[AUDIO] source_file missing");
+    return res.status(500).send("source_file missing");
   }
 
+  const inputFile = path.resolve(track.source_file);
 
-  console.log("[FFMPEG] Source:", track.source_url);
+  console.log("[AUDIO] Track :", track.title);
+  console.log("[AUDIO] File  :", inputFile);
 
+  if (!fs.existsSync(inputFile)) {
+    console.error("[AUDIO] FILE NOT FOUND:", inputFile);
+    return res.status(404).send("Audio file not found");
+  }
 
-  // DB-Robot requested Range bytes=0- during our successful test,
-  // but transcoded output is a fresh stream, so return 200.
   res.status(200);
 
-  res.setHeader(
-    "Content-Type",
-    "audio/mpeg"
-  );
-
-  res.setHeader(
-    "Cache-Control",
-    "no-cache"
-  );
-
-  res.setHeader(
-    "Connection",
-    "keep-alive"
-  );
-
+  res.setHeader("Content-Type", "audio/mpeg");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
 
   const args = [
     "-hide_banner",
     "-loglevel", "error",
 
-    "-i", track.source_url,
+    "-i", inputFile,
 
     "-vn",
 
-    // Same format used by Meow
+    // Format proven working with DB-Robot
     "-ac", "1",
     "-ar", "24000",
     "-b:a", "32k",
@@ -333,13 +276,7 @@ function streamTrack(track, req, res) {
     "pipe:1"
   ];
 
-
-  console.log(
-    "[FFMPEG]",
-    ffmpegPath,
-    args.join(" ")
-  );
-
+  console.log("[FFMPEG] Starting...");
 
   const ffmpeg = spawn(
     ffmpegPath,
@@ -353,23 +290,16 @@ function streamTrack(track, req, res) {
     }
   );
 
-
-  let started = false;
-
+  let audioStarted = false;
 
   ffmpeg.stdout.on("data", () => {
-    if (!started) {
-      started = true;
-
-      console.log(
-        "[FFMPEG] Audio stream started"
-      );
+    if (!audioStarted) {
+      audioStarted = true;
+      console.log("[FFMPEG] Audio stream started");
     }
   });
 
-
   ffmpeg.stdout.pipe(res);
-
 
   ffmpeg.stderr.on("data", data => {
     console.error(
@@ -378,24 +308,8 @@ function streamTrack(track, req, res) {
     );
   });
 
-
-  ffmpeg.on("close", code => {
-    console.log(
-      "[FFMPEG] exited:",
-      code
-    );
-
-    if (!res.writableEnded) {
-      res.end();
-    }
-  });
-
-
   ffmpeg.on("error", err => {
-    console.error(
-      "[FFMPEG ERROR]",
-      err
-    );
+    console.error("[FFMPEG ERROR]", err);
 
     if (!res.headersSent) {
       res.status(500).end();
@@ -404,38 +318,35 @@ function streamTrack(track, req, res) {
     }
   });
 
+  ffmpeg.on("close", code => {
+    console.log("[FFMPEG] exited:", code);
 
-  // IMPORTANT:
-  // Kill FFmpeg only when response/client actually closes.
+    if (!res.writableEnded) {
+      res.end();
+    }
+  });
+
   res.on("close", () => {
     if (!ffmpeg.killed) {
-      console.log(
-        "[FFMPEG] Client disconnected"
-      );
-
+      console.log("[FFMPEG] Client disconnected");
       ffmpeg.kill("SIGKILL");
     }
   });
 }
 
-
 // ============================================================
-// CLEAN OLD TOKENS
+// CLEAN TOKENS
 // ============================================================
 
 setInterval(() => {
   const now = Date.now();
 
   for (const [token, track] of resolvedTracks) {
-    if (
-      now - track.createdAt >
-      60 * 60 * 1000
-    ) {
+    if (now - track.createdAt > 60 * 60 * 1000) {
       resolvedTracks.delete(token);
     }
   }
 }, 10 * 60 * 1000);
-
 
 // ============================================================
 // START
@@ -443,7 +354,7 @@ setInterval(() => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(
-    `YN Music Server V5 running on port ${PORT}`
+    `YN Music Server V5 LOCAL running on port ${PORT}`
   );
 
   console.log(
