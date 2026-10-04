@@ -3,58 +3,57 @@ import express from "express";
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// MP3 công khai dùng riêng để test đường truyền/decoder.
-// Có thể thay TEST_MP3_URL bằng file MP3 bạn sở hữu.
-const TEST_MP3_URL =
-  process.env.TEST_MP3_URL || "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
+const TEST_MP3 =
+  "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3";
 
 app.get("/", (req, res) => {
   res.json({
     name: "YN Music Server",
-    version: "2.0",
+    version: "3.0",
     status: "online",
-    endpoints: {
-      test: "/test.mp3",
-      stream: "/stream_pcm?song=Test"
-    }
+    protocol: "Meow / DB-ROBOT compatible"
   });
 });
 
-// Proxy MP3 để kiểm tra ESP32 có decode MP3 được không
-async function proxyMp3(req, res, url) {
+//
+// MP3 proxy
+//
+app.get("/audio/test.mp3", async (req, res) => {
   try {
-    console.log("[AUDIO] Fetch:", url);
+    console.log("[AUDIO] ESP32 requested /audio/test.mp3");
+    console.log("[AUDIO] UA:", req.headers["user-agent"]);
+    console.log("[AUDIO] Range:", req.headers.range || "none");
 
     const headers = {};
 
-    // ESP32/audio player đôi khi gửi Range.
     if (req.headers.range) {
       headers.Range = req.headers.range;
-      console.log("[AUDIO] Range:", req.headers.range);
     }
 
-    const upstream = await fetch(url, {
+    const upstream = await fetch(TEST_MP3, {
       headers,
       redirect: "follow"
     });
 
-    if (!upstream.ok && upstream.status !== 206) {
-      console.error("[AUDIO] Upstream error:", upstream.status);
-      return res.status(502).send("Audio upstream error");
-    }
-
     console.log(
-      `[AUDIO] upstream=${upstream.status} type=${upstream.headers.get("content-type")}`
+      "[AUDIO] upstream:",
+      upstream.status,
+      upstream.headers.get("content-type")
     );
 
-    // Quan trọng cho decoder MP3 của ESP32
     res.status(upstream.status);
+
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-cache");
 
-    const contentLength = upstream.headers.get("content-length");
-    const contentRange = upstream.headers.get("content-range");
-    const acceptRanges = upstream.headers.get("accept-ranges");
+    const contentLength =
+      upstream.headers.get("content-length");
+
+    const contentRange =
+      upstream.headers.get("content-range");
+
+    const acceptRanges =
+      upstream.headers.get("accept-ranges");
 
     if (contentLength) {
       res.setHeader("Content-Length", contentLength);
@@ -69,10 +68,9 @@ async function proxyMp3(req, res, url) {
     }
 
     if (!upstream.body) {
-      return res.status(502).end();
+      return res.end();
     }
 
-    // Node fetch trả Web ReadableStream.
     const reader = upstream.body.getReader();
 
     req.on("close", () => {
@@ -85,7 +83,9 @@ async function proxyMp3(req, res, url) {
       if (done) break;
 
       if (!res.write(Buffer.from(value))) {
-        await new Promise(resolve => res.once("drain", resolve));
+        await new Promise(resolve =>
+          res.once("drain", resolve)
+        );
       }
     }
 
@@ -100,37 +100,90 @@ async function proxyMp3(req, res, url) {
       res.end();
     }
   }
-}
-
-// Test trực tiếp
-app.get("/test.mp3", async (req, res) => {
-  console.log("[TEST] MP3 requested");
-  await proxyMp3(req, res, TEST_MP3_URL);
 });
 
-// Endpoint mà firmware DB-ROBOT gọi
-app.get("/stream_pcm", async (req, res) => {
-  const song = String(req.query.song || "").trim();
-  const artist = String(req.query.artist || "").trim();
+//
+// Endpoint tương thích Meow / DB-ROBOT
+//
+app.get("/stream_pcm", (req, res) => {
+
+  const song =
+    String(req.query.song || "").trim();
+
+  const artist =
+    String(
+      req.query.artist ||
+      req.query.singer ||
+      ""
+    ).trim();
+
+  const play =
+    String(req.query.url || "").toLowerCase();
 
   console.log("====================================");
-  console.log("[XIAOZHI]");
+  console.log("[DB-ROBOT REQUEST]");
   console.log("Song   :", song);
   console.log("Artist :", artist);
-  console.log("IP     :", req.ip);
+  console.log("url    :", play);
   console.log("UA     :", req.headers["user-agent"]);
-  console.log("Range  :", req.headers.range || "none");
   console.log("====================================");
 
   if (!song) {
-    return res.status(400).send("Missing song");
+    return res.json({
+      title: "",
+      artist: "",
+      audio_url: "",
+      audio_full_url: "",
+      m3u8_url: "",
+      lyric_url: "",
+      cover_url: "",
+      duration: 0,
+      from_cache: false,
+      ip: ""
+    });
   }
 
-  // V2: bất kể Xiaozhi yêu cầu bài nào,
-  // tạm phát cùng một MP3 để kiểm tra firmware.
-  await proxyMp3(req, res, TEST_MP3_URL);
+  const base =
+    `${req.protocol}://${req.get("host")}`;
+
+  const audioURL =
+    `${base}/audio/test.mp3`;
+
+  //
+  // Quan trọng:
+  // DB-ROBOT không yêu cầu url=true.
+  // Nó cần MusicItem JSON.
+  //
+  const musicItem = {
+    title: song,
+    artist: artist,
+
+    audio_url: audioURL,
+    audio_full_url: audioURL,
+
+    m3u8_url: "",
+    lyric_url: "",
+    cover_url: "",
+
+    duration: 372,
+
+    from_cache: false,
+    ip: ""
+  };
+
+  console.log("[DB-ROBOT RESPONSE]");
+  console.log(JSON.stringify(musicItem));
+
+  res.setHeader(
+    "Content-Type",
+    "application/json; charset=utf-8"
+  );
+
+  return res.json(musicItem);
 });
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`YN Music Server V2 running on port ${PORT}`);
+  console.log(
+    `YN Music Server V3 running on port ${PORT}`
+  );
 });
