@@ -1518,12 +1518,542 @@ function streamLocalTrack(
 //
 // Cách này tránh SIGSEGV đã gặp ở V5.1.
 // ============================================================
+// ============================================================
+// V5.3.1 - AUDIUS AUTO FALLBACK
+// ============================================================
 
+async function probeAudiusTrack(track, timeoutMs = 10000) {
+  const sourceUrl =
+    `https://api.audius.co/v1/tracks/${encodeURIComponent(track.id)}/stream`;
+
+  const controller = new AbortController();
+
+  const timer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  console.log(
+    `[AUDIUS FALLBACK] Probe: ${track.title} (${track.id})`
+  );
+
+  try {
+    const response = await fetch(
+      sourceUrl,
+      {
+        redirect: "follow",
+
+        headers: {
+          Accept: "*/*",
+          "User-Agent": "YN-Music-Server/5.3.1"
+        },
+
+        signal: controller.signal
+      }
+    );
+
+    clearTimeout(timer);
+
+    console.log(
+      `[AUDIUS FALLBACK] HTTP ${response.status}`
+    );
+
+    if (!response.ok || !response.body) {
+      try {
+        await response.body?.cancel();
+      } catch {}
+
+      return false;
+    }
+
+    const contentType =
+      response.headers.get("content-type") || "";
+
+    console.log(
+      `[AUDIUS FALLBACK] Type: ${contentType}`
+    );
+
+    // Chỉ cần xác nhận server thực sự trả audio.
+    if (
+      !contentType.toLowerCase().includes("audio")
+    ) {
+      try {
+        await response.body.cancel();
+      } catch {}
+
+      return false;
+    }
+
+    // Probe xong, không dùng connection này để phát.
+    try {
+      await response.body.cancel();
+    } catch {}
+
+    return true;
+
+  } catch (err) {
+    clearTimeout(timer);
+
+    console.log(
+      `[AUDIUS FALLBACK] Probe failed: ${err.message}`
+    );
+
+    return false;
+  }
+}
+
+
+async function selectWorkingAudiusTrack(track) {
+  const candidates = [
+    {
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      duration: track.duration,
+      genre: track.genre,
+      provider: "audius",
+      score: track.score
+    },
+
+    ...(track.alternatives || [])
+  ];
+
+  // Tối đa 5 kết quả.
+  const limited =
+    candidates.slice(0, 5);
+
+  console.log(
+    `[AUDIUS FALLBACK] ${limited.length} candidates available`
+  );
+
+  for (
+    let i = 0;
+    i < limited.length;
+    i++
+  ) {
+    const candidate =
+      limited[i];
+
+    console.log(
+      `\n[AUDIUS FALLBACK] TRY #${i + 1}`
+    );
+
+    console.log(
+      "ID     :",
+      candidate.id
+    );
+
+    console.log(
+      "Title  :",
+      candidate.title
+    );
+
+    console.log(
+      "Artist :",
+      candidate.artist
+    );
+
+    console.log(
+      "Score  :",
+      candidate.score
+    );
+
+    const working =
+      await probeAudiusTrack(
+        candidate
+      );
+
+    if (working) {
+      console.log(
+        `[AUDIUS FALLBACK] SELECTED #${i + 1}: ${candidate.title}`
+      );
+
+      return candidate;
+    }
+
+    console.log(
+      `[AUDIUS FALLBACK] FAILED #${i + 1}`
+    );
+  }
+
+  return null;
+}
 async function streamAudiusTrack(
   track,
   req,
   res
 ) {
+  // ==========================================================
+  // STEP 1 - FIND A WORKING AUDIUS CANDIDATE
+  // ==========================================================
+
+  const selected =
+    await selectWorkingAudiusTrack(
+      track
+    );
+
+  if (!selected) {
+    console.error(
+      "[AUDIUS FALLBACK] ALL CANDIDATES FAILED"
+    );
+
+    return res
+      .status(502)
+      .send(
+        "No working Audius source"
+      );
+  }
+
+
+  const sourceUrl =
+    `https://api.audius.co/v1/tracks/${encodeURIComponent(selected.id)}/stream`;
+
+
+  console.log(
+    "\n[AUDIUS AUDIO] SELECTED"
+  );
+
+  console.log(
+    "ID     :",
+    selected.id
+  );
+
+  console.log(
+    "Title  :",
+    selected.title
+  );
+
+  console.log(
+    "Artist :",
+    selected.artist
+  );
+
+  console.log(
+    "Source :",
+    sourceUrl
+  );
+
+
+  try {
+    // ========================================================
+    // NODE FETCHES SELECTED AUDIUS SOURCE
+    // ========================================================
+
+    const controller =
+      new AbortController();
+
+    const timer =
+      setTimeout(
+        () => controller.abort(),
+        15000
+      );
+
+
+    const upstream =
+      await fetch(
+        sourceUrl,
+        {
+          redirect:
+            "follow",
+
+          headers: {
+            Accept:
+              "*/*",
+
+            "User-Agent":
+              "YN-Music-Server/5.3.1"
+          },
+
+          signal:
+            controller.signal
+        }
+      );
+
+
+    clearTimeout(timer);
+
+
+    console.log(
+      "[AUDIUS FETCH] HTTP:",
+      upstream.status
+    );
+
+
+    console.log(
+      "[AUDIUS FETCH] Type:",
+      upstream.headers.get(
+        "content-type"
+      )
+    );
+
+
+    console.log(
+      "[AUDIUS FETCH] Length:",
+      upstream.headers.get(
+        "content-length"
+      )
+    );
+
+
+    if (
+      !upstream.ok ||
+      !upstream.body
+    ) {
+      console.error(
+        "[AUDIUS FETCH] FAILED AFTER PROBE"
+      );
+
+      return res
+        .status(502)
+        .send(
+          "Audius stream failed"
+        );
+    }
+
+
+    // ========================================================
+    // RESPONSE TO DB-ROBOT
+    // ========================================================
+
+    res.status(200);
+
+    res.setHeader(
+      "Content-Type",
+      "audio/mpeg"
+    );
+
+    res.setHeader(
+      "Cache-Control",
+      "no-cache"
+    );
+
+
+    // ========================================================
+    // FFMPEG
+    // ========================================================
+
+    const args = [
+      "-hide_banner",
+
+      "-loglevel",
+      "error",
+
+      "-i",
+      "pipe:0",
+
+      "-vn",
+
+      "-ac",
+      "1",
+
+      "-ar",
+      "24000",
+
+      "-b:a",
+      "32k",
+
+      "-codec:a",
+      "libmp3lame",
+
+      "-f",
+      "mp3",
+
+      "pipe:1"
+    ];
+
+
+    console.log(
+      "[FFMPEG AUDIUS] Starting via stdin..."
+    );
+
+
+    const ffmpeg =
+      spawn(
+        ffmpegPath,
+        args,
+        {
+          stdio: [
+            "pipe",
+            "pipe",
+            "pipe"
+          ]
+        }
+      );
+
+
+    console.log(
+      "[FFMPEG AUDIUS] PID:",
+      ffmpeg.pid
+    );
+
+
+    let audioStarted = false;
+
+
+    ffmpeg.stdout.on(
+      "data",
+      () => {
+        if (!audioStarted) {
+          audioStarted = true;
+
+          console.log(
+            "[FFMPEG AUDIUS] Audio stream started"
+          );
+        }
+      }
+    );
+
+
+    ffmpeg.stdout.pipe(
+      res
+    );
+
+
+    ffmpeg.stderr.on(
+      "data",
+      data => {
+        console.error(
+          "[FFMPEG AUDIUS STDERR]",
+          data
+            .toString()
+            .trim()
+        );
+      }
+    );
+
+
+    ffmpeg.on(
+      "error",
+      err => {
+        console.error(
+          "[FFMPEG AUDIUS ERROR]",
+          err
+        );
+      }
+    );
+
+
+    ffmpeg.on(
+      "exit",
+      (
+        code,
+        signal
+      ) => {
+        console.log(
+          "[FFMPEG AUDIUS] EXIT",
+          "code =",
+          code,
+          "signal =",
+          signal
+        );
+      }
+    );
+
+
+    ffmpeg.on(
+      "close",
+      (
+        code,
+        signal
+      ) => {
+        console.log(
+          "[FFMPEG AUDIUS] CLOSE",
+          "code =",
+          code,
+          "signal =",
+          signal
+        );
+
+        if (
+          !res.writableEnded
+        ) {
+          res.end();
+        }
+      }
+    );
+
+
+    // ========================================================
+    // AUDIUS -> FFMPEG STDIN
+    // ========================================================
+
+    const reader =
+      upstream.body.getReader();
+
+
+    try {
+      while (true) {
+        const {
+          done,
+          value
+        } =
+          await reader.read();
+
+
+        if (done) {
+          console.log(
+            "[AUDIUS FETCH] Stream finished"
+          );
+
+          ffmpeg.stdin.end();
+
+          break;
+        }
+
+
+        const buffer =
+          Buffer.from(
+            value
+          );
+
+
+        const writable =
+          ffmpeg.stdin.write(
+            buffer
+          );
+
+
+        if (!writable) {
+          await new Promise(
+            resolve => {
+              ffmpeg.stdin.once(
+                "drain",
+                resolve
+              );
+            }
+          );
+        }
+      }
+
+    } catch (err) {
+      console.error(
+        "[AUDIUS PIPE ERROR]",
+        err
+      );
+
+      if (
+        !ffmpeg.stdin.destroyed
+      ) {
+        ffmpeg.stdin.destroy();
+      }
+    }
+
+  } catch (err) {
+    console.error(
+      "[AUDIUS AUDIO ERROR]",
+      err
+    );
+
+    if (!res.headersSent) {
+      return res
+        .status(502)
+        .send(
+          "Audius audio error"
+        );
+    }
+
+    res.end();
+  }
+}
 
   const sourceUrl =
     `https://api.audius.co/v1/tracks/${encodeURIComponent(track.id)}/stream`;
