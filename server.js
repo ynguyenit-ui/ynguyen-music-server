@@ -5,24 +5,20 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 
+
+// ============================================================
+// APP
+// ============================================================
+
 const app = express();
-app.set("trust proxy", true);
 
-const PORT = process.env.PORT || 3000;
+app.set(
+  "trust proxy",
+  true
+);
 
-// ============================================================
-// YN MUSIC SERVER V5.3
-//
-// SEARCH:
-//   LOCAL -> AUDIUS SMART RANKING
-//
-// AUDIO:
-//   LOCAL  -> FFmpeg -> ESP32
-//   AUDIUS -> Node fetch -> FFmpeg stdin -> ESP32
-//
-// DB-ROBOT OUTPUT:
-//   MP3 / MONO / 24000 Hz / 32 kbps
-// ============================================================
+const PORT =
+  process.env.PORT || 3000;
 
 
 // ============================================================
@@ -32,35 +28,73 @@ const PORT = process.env.PORT || 3000;
 let catalog = [];
 
 try {
-  catalog = JSON.parse(
-    fs.readFileSync("./catalog.json", "utf8")
-  );
+  const catalogPath =
+    path.join(
+      process.cwd(),
+      "catalog.json"
+    );
 
-  console.log(
-    `[CATALOG] Loaded ${catalog.length} tracks`
-  );
+  if (
+    fs.existsSync(
+      catalogPath
+    )
+  ) {
+    catalog =
+      JSON.parse(
+        fs.readFileSync(
+          catalogPath,
+          "utf8"
+        )
+      );
+
+    if (
+      !Array.isArray(
+        catalog
+      )
+    ) {
+      catalog = [];
+    }
+  }
 
 } catch (err) {
   console.error(
     "[CATALOG ERROR]",
     err
   );
+
+  catalog = [];
 }
+
+
+console.log(
+  `[CATALOG] ${catalog.length} tracks loaded`
+);
 
 
 // ============================================================
 // NORMALIZE VIETNAMESE
 // ============================================================
 
-function normalize(text = "") {
+function normalize(
+  text = ""
+) {
   return String(text)
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(
+      /[\u0300-\u036f]/g,
+      ""
+    )
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, " ")
-    .replace(/\s+/g, " ")
+    .replace(
+      /[^a-z0-9 ]/g,
+      " "
+    )
+    .replace(
+      /\s+/g,
+      " "
+    )
     .trim();
 }
 
@@ -69,46 +103,91 @@ function normalize(text = "") {
 // WORD HELPERS
 // ============================================================
 
-function words(text = "") {
-  return normalize(text)
+function words(
+  text = ""
+) {
+  const value =
+    normalize(text);
+
+  if (!value) {
+    return [];
+  }
+
+  return value
     .split(" ")
     .filter(Boolean);
 }
 
 
-function wordOverlap(a, b) {
-  const aWords = words(a);
-  const bWords = new Set(words(b));
+function wordOverlap(
+  a,
+  b
+) {
+  const aa =
+    new Set(
+      words(a)
+    );
 
-  if (!aWords.length) {
+  const bb =
+    new Set(
+      words(b)
+    );
+
+
+  if (
+    !aa.size ||
+    !bb.size
+  ) {
     return 0;
   }
 
+
   let matches = 0;
 
-  for (const word of aWords) {
-    if (bWords.has(word)) {
+  for (
+    const word of aa
+  ) {
+    if (
+      bb.has(word)
+    ) {
       matches++;
     }
   }
 
-  return matches / aWords.length;
+
+  return (
+    matches /
+    Math.max(
+      aa.size,
+      bb.size
+    )
+  );
 }
 
 
-function containsWords(text, wanted) {
-  const haystack =
-    new Set(words(text));
+function containsWords(
+  text,
+  wanted
+) {
+  const textWords =
+    new Set(
+      words(text)
+    );
 
-  const needles =
+  const wantedWords =
     words(wanted);
 
-  if (!needles.length) {
+
+  if (
+    !wantedWords.length
+  ) {
     return false;
   }
 
-  return needles.every(
-    word => haystack.has(word)
+
+  return wantedWords.every(
+    word =>
+      textWords.has(word)
   );
 }
 
@@ -117,12 +196,26 @@ function containsWords(text, wanted) {
 // LEVENSHTEIN
 // ============================================================
 
-function levenshtein(a, b) {
-  const matrix = Array.from(
-    { length: b.length + 1 },
-    () =>
-      Array(a.length + 1).fill(0)
-  );
+function levenshtein(
+  a,
+  b
+) {
+  a = normalize(a);
+  b = normalize(b);
+
+
+  const matrix =
+    Array.from(
+      {
+        length:
+          b.length + 1
+      },
+      () =>
+        new Array(
+          a.length + 1
+        ).fill(0)
+    );
+
 
   for (
     let i = 0;
@@ -132,6 +225,7 @@ function levenshtein(a, b) {
     matrix[i][0] = i;
   }
 
+
   for (
     let j = 0;
     j <= a.length;
@@ -139,6 +233,7 @@ function levenshtein(a, b) {
   ) {
     matrix[0][j] = j;
   }
+
 
   for (
     let i = 1;
@@ -150,45 +245,54 @@ function levenshtein(a, b) {
       j <= a.length;
       j++
     ) {
-      if (
+      const cost =
         b[i - 1] ===
         a[j - 1]
-      ) {
-        matrix[i][j] =
-          matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] =
-          Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          );
-      }
+          ? 0
+          : 1;
+
+
+      matrix[i][j] =
+        Math.min(
+          matrix[i - 1][j] + 1,
+          matrix[i][j - 1] + 1,
+          matrix[i - 1][j - 1] +
+            cost
+        );
     }
   }
 
-  return matrix[b.length][a.length];
+
+  return matrix[
+    b.length
+  ][
+    a.length
+  ];
 }
 
 
-// ============================================================
-// SIMILARITY
-// ============================================================
-
-function similarity(a, b) {
+function similarity(
+  a,
+  b
+) {
   a = normalize(a);
   b = normalize(b);
 
-  if (!a || !b) {
+
+  if (
+    !a ||
+    !b
+  ) {
     return 0;
   }
 
-  if (a === b) {
+
+  if (
+    a === b
+  ) {
     return 1;
   }
 
-  const distance =
-    levenshtein(a, b);
 
   const maxLength =
     Math.max(
@@ -196,13 +300,58 @@ function similarity(a, b) {
       b.length
     );
 
+
   if (!maxLength) {
-    return 0;
+    return 1;
   }
 
-  return (
+
+  return Math.max(
+    0,
     1 -
-    distance / maxLength
+      levenshtein(
+        a,
+        b
+      ) /
+        maxLength
+  );
+}
+
+
+// ============================================================
+// LOCAL TRACK HELPERS
+// ============================================================
+
+function getLocalTitle(
+  track
+) {
+  return (
+    track.title ||
+    track.name ||
+    ""
+  );
+}
+
+
+function getLocalArtist(
+  track
+) {
+  return (
+    track.artist ||
+    track.singer ||
+    ""
+  );
+}
+
+
+function getLocalSourceFile(
+  track
+) {
+  return (
+    track.source_file ||
+    track.file ||
+    track.path ||
+    ""
   );
 }
 
@@ -216,48 +365,55 @@ function scoreLocalTrack(
   song,
   artist
 ) {
-  const titleScore =
+  const title =
+    getLocalTitle(
+      track
+    );
+
+  const trackArtist =
+    getLocalArtist(
+      track
+    );
+
+
+  const titleSimilarity =
     similarity(
-      song,
-      track.title
+      title,
+      song
     );
 
-  const wordScore =
+
+  const titleOverlap =
     wordOverlap(
-      song,
-      track.title
+      title,
+      song
     );
 
-  let artistScore = 0;
 
-  if (
-    artist &&
-    track.artist
-  ) {
-    artistScore =
-      similarity(
-        artist,
-        track.artist
-      );
-  }
+  const artistSimilarity =
+    artist
+      ? similarity(
+          trackArtist,
+          artist
+        )
+      : 0;
+
 
   let score =
-    titleScore * 100;
+    titleSimilarity * 100 +
+    titleOverlap * 50 +
+    artistSimilarity * 30;
 
-  score +=
-    wordScore * 50;
-
-  score +=
-    artistScore * 30;
 
   if (
     containsWords(
-      track.title,
+      title,
       song
     )
   ) {
     score += 30;
   }
+
 
   return score;
 }
@@ -268,56 +424,64 @@ function findLocalTrack(
   artist
 ) {
   let best = null;
-  let bestScore = 0;
+
 
   for (
-    const track of catalog
+    const item of catalog
   ) {
     const score =
       scoreLocalTrack(
-        track,
+        item,
         song,
         artist
       );
 
+
     console.log(
-      `[LOCAL CANDIDATE] ` +
-      `${track.title} | ` +
-      `score=${score.toFixed(1)}`
+      `[LOCAL CANDIDATE] ${getLocalTitle(item)} | score=${score.toFixed(1)}`
     );
 
+
     if (
-      score > bestScore
+      !best ||
+      score > best.score
     ) {
-      bestScore = score;
-      best = track;
+      best = {
+        ...item,
+
+        title:
+          getLocalTitle(
+            item
+          ),
+
+        artist:
+          getLocalArtist(
+            item
+          ),
+
+        source_file:
+          getLocalSourceFile(
+            item
+          ),
+
+        provider:
+          "local",
+
+        score
+      };
     }
   }
 
-  // Fuzzy threshold.
-  // Cho phép trường hợp:
-  // "Kẻ Sai Tình 2"
-  // nhận nhầm từ
-  // "Kẻ Say Tình 2"
 
   if (
-    !best ||
-    bestScore < 70
+    best &&
+    best.score >= 70
   ) {
-    return null;
+    return best;
   }
 
-  return {
-    ...best,
 
-    provider:
-      "local",
-
-    score:
-      Math.round(
-        bestScore
-      )
-  };
+  return null;
 }
 
 
@@ -327,83 +491,92 @@ function findLocalTrack(
 
 async function searchAudius(
   song,
-  artist = ""
+  artist
 ) {
   const query =
     [song, artist]
       .filter(Boolean)
       .join(" ");
 
-  const url =
-    "https://api.audius.co/v1/tracks/search" +
-    "?query=" +
-    encodeURIComponent(query) +
-    "&limit=10";
 
   console.log(
     "[AUDIUS SEARCH] Query:",
     query
   );
 
+
+  const url =
+    `https://api.audius.co/v1/tracks/search?query=${encodeURIComponent(query)}&limit=10`;
+
+
   const response =
     await fetch(
       url,
       {
-        redirect:
-          "follow",
-
         headers: {
           Accept:
             "application/json",
 
           "User-Agent":
-            "YN-Music-Server/5.3"
+            "YN-Music-Server/5.3.1"
         }
       }
     );
+
 
   console.log(
     "[AUDIUS SEARCH] HTTP:",
     response.status
   );
 
+
   if (!response.ok) {
-    const body =
-      await response.text();
-
-    console.error(
-      "[AUDIUS SEARCH ERROR]",
-      body.slice(0, 500)
-    );
-
     throw new Error(
       `Audius search HTTP ${response.status}`
     );
   }
 
+
   const json =
     await response.json();
 
-  return (
-    json.data || []
-  ).map(
+
+  const data =
+    Array.isArray(
+      json?.data
+    )
+      ? json.data
+      : [];
+
+
+  return data.map(
     track => ({
       id:
-        track.id,
+        String(
+          track.id || ""
+        ),
 
       title:
-        track.title || "",
+        String(
+          track.title || ""
+        ),
 
       artist:
-        track.user?.name ||
-        track.user?.handle ||
-        "",
+        String(
+          track.user?.name ||
+          track.user?.handle ||
+          ""
+        ),
 
       duration:
-        track.duration || 0,
+        Number(
+          track.duration || 0
+        ),
 
       genre:
-        track.genre || "",
+        String(
+          track.genre || ""
+        ),
 
       provider:
         "audius"
@@ -413,7 +586,7 @@ async function searchAudius(
 
 
 // ============================================================
-// V5.3 - UNWANTED VERSION DETECTION
+// AUDIUS SMART RANKING
 // ============================================================
 
 const UNWANTED_VERSIONS = [
@@ -431,124 +604,98 @@ const UNWANTED_VERSIONS = [
 ];
 
 
-function requestedSpecialVersion(
-  song
-) {
-  const n =
-    normalize(song);
-
-  return (
-    UNWANTED_VERSIONS.some(
-      word =>
-        n.includes(word)
-    )
-  );
-}
-
-
 function unwantedVersionPenalty(
   track,
-  song
+  requestedSong
 ) {
-  // Nếu user nói rõ:
-  // "Lạc Trôi remix"
-  // thì remix KHÔNG bị phạt.
-
-  if (
-    requestedSpecialVersion(
-      song
-    )
-  ) {
-    return 0;
-  }
-
   const title =
     normalize(
       track.title
     );
 
+  const requested =
+    normalize(
+      requestedSong
+    );
+
+
   let penalty = 0;
 
+
   for (
-    const word of
-    UNWANTED_VERSIONS
+    const unwanted of
+      UNWANTED_VERSIONS
   ) {
+    const normalizedUnwanted =
+      normalize(
+        unwanted
+      );
+
+
+    const trackHas =
+      title.includes(
+        normalizedUnwanted
+      );
+
+
+    const requestHas =
+      requested.includes(
+        normalizedUnwanted
+      );
+
+
     if (
-      title.includes(word)
+      trackHas &&
+      !requestHas
     ) {
       penalty += 35;
     }
   }
 
+
   return penalty;
 }
 
-
-// ============================================================
-// V5.3 - SMART AUDIUS SCORE
-// ============================================================
 
 function scoreAudiusTrack(
   track,
   song,
   artist
 ) {
-  const requestedSong =
-    normalize(song);
-
-  const requestedArtist =
-    normalize(artist);
-
-  const trackTitle =
-    normalize(
-      track.title
-    );
-
-  const uploader =
-    normalize(
-      track.artist
-    );
-
   let score = 0;
 
+
   // ----------------------------------------------------------
-  // 1. Fuzzy title similarity
+  // TITLE FUZZY
   // ----------------------------------------------------------
 
   const fuzzyTitle =
     similarity(
-      requestedSong,
-      trackTitle
+      track.title,
+      song
     );
+
 
   score +=
     fuzzyTitle * 100;
 
 
   // ----------------------------------------------------------
-  // 2. Song word overlap
-  //
-  // Ví dụ:
-  // requested = Lac Troi
-  // result    = Lac Troi - Son Tung M-TP
+  // SONG WORD OVERLAP
   // ----------------------------------------------------------
 
   const songWords =
     wordOverlap(
-      song,
-      track.title
+      track.title,
+      song
     );
+
 
   score +=
     songWords * 100;
 
 
-  // ----------------------------------------------------------
-  // 3. Full song words exist in result title
-  // ----------------------------------------------------------
-
   if (
-    requestedSong &&
     containsWords(
       track.title,
       song
@@ -559,29 +706,25 @@ function scoreAudiusTrack(
 
 
   // ----------------------------------------------------------
-  // 4. Artist ranking
-  //
-  // Audius uploader có thể không phải ca sĩ.
-  //
-  // Ví dụ:
-  // title    = Lac Troi - Son Tung M-TP
-  // uploader = Toronono
-  //
-  // Artist trong TITLE quan trọng hơn uploader.
+  // ARTIST
   // ----------------------------------------------------------
 
   let artistTitleScore = 0;
   let artistUploaderScore = 0;
 
-  if (requestedArtist) {
+
+  if (artist) {
+
     artistTitleScore =
       wordOverlap(
-        artist,
-        track.title
+        track.title,
+        artist
       );
+
 
     score +=
       artistTitleScore * 80;
+
 
     if (
       containsWords(
@@ -592,11 +735,13 @@ function scoreAudiusTrack(
       score += 80;
     }
 
+
     artistUploaderScore =
       similarity(
-        requestedArtist,
-        uploader
+        track.artist,
+        artist
       );
+
 
     score +=
       artistUploaderScore * 25;
@@ -604,8 +749,7 @@ function scoreAudiusTrack(
 
 
   // ----------------------------------------------------------
-  // 5. Penalty:
-  // remix / cover / karaoke / etc.
+  // REMIX / COVER / KARAOKE PENALTY
   // ----------------------------------------------------------
 
   const penalty =
@@ -614,11 +758,12 @@ function scoreAudiusTrack(
       song
     );
 
+
   score -= penalty;
 
 
   // ----------------------------------------------------------
-  // 6. Very short audio penalty
+  // VERY SHORT TRACK PENALTY
   // ----------------------------------------------------------
 
   if (
@@ -640,16 +785,13 @@ function scoreAudiusTrack(
 }
 
 
-// ============================================================
-// V5.3 - RANK AUDIUS RESULTS
-// ============================================================
-
 function chooseAudiusTracks(
   tracks,
   song,
   artist
 ) {
   const ranked = [];
+
 
   for (
     const track of tracks
@@ -660,6 +802,7 @@ function chooseAudiusTracks(
         song,
         artist
       );
+
 
     ranked.push({
       ...track,
@@ -686,8 +829,10 @@ function chooseAudiusTracks(
     "\n[AUDIUS RANKING]"
   );
 
+
   ranked.forEach(
     (track, index) => {
+
       console.log(
         `#${index + 1}`,
         `score=${track.score}`,
@@ -720,14 +865,17 @@ function createToken(
       .randomBytes(8)
       .toString("hex");
 
+
   resolvedTracks.set(
     token,
     {
       ...track,
+
       createdAt:
         Date.now()
     }
   );
+
 
   return token;
 }
@@ -735,6 +883,10 @@ function createToken(
 
 // ============================================================
 // MUSIC ITEM
+//
+// QUAN TRỌNG:
+// DB-ROBOT cần relative audio URL:
+// /audio/TOKEN.mp3
 // ============================================================
 
 function makeMusicItem(
@@ -743,6 +895,7 @@ function makeMusicItem(
 ) {
   const audioPath =
     `/audio/${token}.mp3`;
+
 
   return {
     title:
@@ -777,8 +930,6 @@ function makeMusicItem(
       ""
   };
 }
-
-
 // ============================================================
 // STATUS
 // ============================================================
@@ -832,6 +983,9 @@ app.get(
           true,
 
         alternatives_cache:
+          true,
+
+        audius_auto_fallback:
           true
       }
     });
@@ -840,10 +994,17 @@ app.get(
 
 
 // ============================================================
-// DB-ROBOT SEARCH
+// STREAM_PCM
 //
-// 1. LOCAL
-// 2. AUDIUS SMART SEARCH
+// DB-ROBOT:
+//
+// /stream_pcm?song=...&artist=...
+//
+// Search order:
+//
+// 1. Local
+// 2. Audius
+//
 // ============================================================
 
 app.get(
@@ -855,6 +1016,7 @@ app.get(
         req.query.song ||
         ""
       ).trim();
+
 
     const artist =
       String(
@@ -901,6 +1063,7 @@ app.get(
 
 
     if (!song) {
+
       return res
         .status(400)
         .json({
@@ -911,7 +1074,7 @@ app.get(
 
 
     // ========================================================
-    // STEP 1: LOCAL SEARCH
+    // STEP 1 - LOCAL SEARCH
     // ========================================================
 
     const localTrack =
@@ -979,7 +1142,7 @@ app.get(
 
 
     // ========================================================
-    // STEP 2: AUDIUS SEARCH
+    // STEP 2 - AUDIUS SEARCH
     // ========================================================
 
     try {
@@ -999,9 +1162,11 @@ app.get(
       if (
         !results.length
       ) {
+
         console.log(
           "[AUDIUS] NO RESULTS"
         );
+
 
         return res
           .status(404)
@@ -1038,6 +1203,7 @@ app.get(
         console.log(
           "[AUDIUS] NO MATCH"
         );
+
 
         return res
           .status(404)
@@ -1079,9 +1245,10 @@ app.get(
 
 
       // ======================================================
-      // SAVE TOP ALTERNATIVES
+      // SAVE ALTERNATIVES FOR AUTO FALLBACK
       //
-      // V5.3 chuẩn bị sẵn cho auto fallback.
+      // #1 = onlineTrack
+      // #2 -> #5 = alternatives
       // ======================================================
 
       const alternatives =
@@ -1177,11 +1344,16 @@ app.get(
 
 // ============================================================
 // AUDIO TOKEN
+//
+// DB-ROBOT gọi:
+//
+// /audio/TOKEN.mp3
+//
 // ============================================================
 
 app.get(
   "/audio/:token.mp3",
-  (req, res) => {
+  async (req, res) => {
 
     const token =
       req.params.token;
@@ -1216,7 +1388,7 @@ app.get(
     console.log(
       "Range    :",
       req.headers.range ||
-      "none"
+      ""
     );
 
     console.log(
@@ -1227,13 +1399,14 @@ app.get(
     if (!track) {
 
       console.log(
-        "[AUDIO] UNKNOWN TOKEN"
+        "[AUDIO] TOKEN NOT FOUND"
       );
+
 
       return res
         .status(404)
         .send(
-          "Track not found"
+          "Audio token not found"
         );
     }
 
@@ -1243,17 +1416,38 @@ app.get(
       track.provider
     );
 
-
     console.log(
       "[AUDIO] Title:",
       track.title
     );
 
 
+    // ========================================================
+    // LOCAL
+    // ========================================================
+
+    if (
+      track.provider ===
+      "local"
+    ) {
+
+      return streamLocalTrack(
+        track,
+        req,
+        res
+      );
+    }
+
+
+    // ========================================================
+    // AUDIUS
+    // ========================================================
+
     if (
       track.provider ===
       "audius"
     ) {
+
       return streamAudiusTrack(
         track,
         req,
@@ -1262,11 +1456,17 @@ app.get(
     }
 
 
-    return streamLocalTrack(
-      track,
-      req,
-      res
+    console.error(
+      "[AUDIO] UNKNOWN PROVIDER:",
+      track.provider
     );
+
+
+    return res
+      .status(500)
+      .send(
+        "Unknown audio provider"
+      );
   }
 );
 
@@ -1274,7 +1474,13 @@ app.get(
 // ============================================================
 // LOCAL AUDIO
 //
-// FILE -> FFMPEG -> ESP32
+// Local file
+//      ↓
+// FFmpeg
+//      ↓
+// MP3 mono 24kHz 32kbps
+//      ↓
+// DB-ROBOT
 // ============================================================
 
 function streamLocalTrack(
@@ -1283,36 +1489,41 @@ function streamLocalTrack(
   res
 ) {
 
-  if (
-    !track.source_file
-  ) {
+  const sourceFile =
+    track.source_file ||
+    track.file ||
+    track.path ||
+    "";
+
+
+  if (!sourceFile) {
 
     console.error(
-      "[LOCAL AUDIO] source_file missing"
+      "[LOCAL AUDIO] Missing source_file"
     );
 
+
     return res
-      .status(500)
+      .status(404)
       .send(
-        "source_file missing"
+        "Local audio file not configured"
       );
   }
 
 
   const inputFile =
-    path.resolve(
-      track.source_file
-    );
+    path.isAbsolute(
+      sourceFile
+    )
+      ? sourceFile
+      : path.join(
+          process.cwd(),
+          sourceFile
+        );
 
 
   console.log(
-    "[LOCAL AUDIO] Track:",
-    track.title
-  );
-
-
-  console.log(
-    "[LOCAL AUDIO] File :",
+    "[LOCAL AUDIO] File:",
     inputFile
   );
 
@@ -1328,22 +1539,21 @@ function streamLocalTrack(
       inputFile
     );
 
+
     return res
       .status(404)
       .send(
-        "Audio file not found"
+        "Local audio file not found"
       );
   }
 
 
   res.status(200);
 
-
   res.setHeader(
     "Content-Type",
     "audio/mpeg"
   );
-
 
   res.setHeader(
     "Cache-Control",
@@ -1452,6 +1662,18 @@ function streamLocalTrack(
         "[FFMPEG LOCAL ERROR]",
         err
       );
+
+
+      if (
+        !res.headersSent
+      ) {
+
+        res
+          .status(500)
+          .send(
+            "FFmpeg local error"
+          );
+      }
     }
   );
 
@@ -1493,6 +1715,7 @@ function streamLocalTrack(
       if (
         !res.writableEnded
       ) {
+
         res.end();
       }
     }
@@ -1501,43 +1724,43 @@ function streamLocalTrack(
 
 
 // ============================================================
-// AUDIUS AUDIO
+// AUDIUS V5.3.1 AUTO FALLBACK
 //
-// IMPORTANT:
-// FFmpeg KHÔNG mở URL Audius trực tiếp.
+// Candidate #1 lỗi
+//      ↓
+// thử #2
+//      ↓
+// thử #3
+//      ↓
+// thử #4/#5
 //
-// Audius HTTPS
-//      ↓
-// Node fetch()
-//      ↓
-// FFmpeg stdin
-//      ↓
-// MP3 mono / 24kHz / 32kbps
-//      ↓
-// DB-ROBOT
-//
-// Cách này tránh SIGSEGV đã gặp ở V5.1.
-// ============================================================
-// ============================================================
-// V5.3.1 - AUDIUS AUTO FALLBACK
 // ============================================================
 
-async function probeAudiusTrack(track, timeoutMs = 10000) {
+async function probeAudiusTrack(
+  track,
+  timeoutMs = 10000
+) {
+
   const sourceUrl =
     `https://api.audius.co/v1/tracks/${encodeURIComponent(track.id)}/stream`;
+
 
   const controller =
     new AbortController();
 
+
   const timer =
     setTimeout(
-      () => controller.abort(),
+      () =>
+        controller.abort(),
       timeoutMs
     );
+
 
   console.log(
     `[AUDIUS FALLBACK] Probe: ${track.title} (${track.id})`
   );
+
 
   try {
 
@@ -1594,17 +1817,25 @@ async function probeAudiusTrack(track, timeoutMs = 10000) {
         await response.body?.cancel();
       } catch {}
 
+
       return false;
     }
 
 
     const type =
-      contentType.toLowerCase();
+      contentType
+        .toLowerCase();
 
 
+    // Audius thường trả audio/mpeg.
+    // Cho phép thêm application/octet-stream.
     if (
-      !type.startsWith("audio/") &&
-      !type.includes("octet-stream")
+      !type.startsWith(
+        "audio/"
+      ) &&
+      !type.includes(
+        "octet-stream"
+      )
     ) {
 
       console.log(
@@ -1621,8 +1852,8 @@ async function probeAudiusTrack(track, timeoutMs = 10000) {
     }
 
 
-    // Probe only.
-    // Actual playback will perform a new fetch.
+    // Đây chỉ là probe.
+    // Đóng connection và fetch lại khi phát.
     try {
       await response.body.cancel();
     } catch {}
@@ -1648,36 +1879,67 @@ async function probeAudiusTrack(track, timeoutMs = 10000) {
   }
 }
 
-async function selectWorkingAudiusTrack(track) {
+
+// ============================================================
+// SELECT WORKING AUDIUS TRACK
+// ============================================================
+
+async function selectWorkingAudiusTrack(
+  track
+) {
+
   const candidates = [
     {
-      id: track.id,
-      title: track.title,
-      artist: track.artist,
-      duration: track.duration,
-      genre: track.genre,
-      provider: "audius",
-      score: track.score
+      id:
+        track.id,
+
+      title:
+        track.title,
+
+      artist:
+        track.artist,
+
+      duration:
+        track.duration,
+
+      genre:
+        track.genre,
+
+      provider:
+        "audius",
+
+      score:
+        track.score
     },
 
-    ...(track.alternatives || [])
+    ...(
+      track.alternatives ||
+      []
+    )
   ];
 
-  // Tối đa 5 kết quả.
+
   const limited =
-    candidates.slice(0, 5);
+    candidates.slice(
+      0,
+      5
+    );
+
 
   console.log(
     `[AUDIUS FALLBACK] ${limited.length} candidates available`
   );
+
 
   for (
     let i = 0;
     i < limited.length;
     i++
   ) {
+
     const candidate =
       limited[i];
+
 
     console.log(
       `\n[AUDIUS FALLBACK] TRY #${i + 1}`
@@ -1703,33 +1965,56 @@ async function selectWorkingAudiusTrack(track) {
       candidate.score
     );
 
+
     const working =
       await probeAudiusTrack(
         candidate
       );
 
+
     if (working) {
+
       console.log(
         `[AUDIUS FALLBACK] SELECTED #${i + 1}: ${candidate.title}`
       );
 
+
       return candidate;
     }
+
 
     console.log(
       `[AUDIUS FALLBACK] FAILED #${i + 1}`
     );
   }
 
+
   return null;
 }
+
+
+// ============================================================
+// STREAM AUDIUS
+//
+// Node fetch()
+//      ↓
+// FFmpeg stdin
+//      ↓
+// MP3 24kHz mono 32kbps
+//      ↓
+// ESP32
+//
+// KHÔNG để FFmpeg mở Audius URL trực tiếp.
+// ============================================================
+
 async function streamAudiusTrack(
   track,
   req,
   res
 ) {
+
   // ==========================================================
-  // STEP 1 - FIND A WORKING AUDIUS CANDIDATE
+  // FIND WORKING CANDIDATE
   // ==========================================================
 
   const selected =
@@ -1737,10 +2022,13 @@ async function streamAudiusTrack(
       track
     );
 
+
   if (!selected) {
+
     console.error(
       "[AUDIUS FALLBACK] ALL CANDIDATES FAILED"
     );
+
 
     return res
       .status(502)
@@ -1780,16 +2068,19 @@ async function streamAudiusTrack(
 
 
   try {
+
     // ========================================================
-    // NODE FETCHES SELECTED AUDIUS SOURCE
+    // NODE FETCH AUDIUS
     // ========================================================
 
     const controller =
       new AbortController();
 
+
     const timer =
       setTimeout(
-        () => controller.abort(),
+        () =>
+          controller.abort(),
         15000
       );
 
@@ -1815,7 +2106,12 @@ async function streamAudiusTrack(
       );
 
 
-    clearTimeout(timer);
+    // Timeout chỉ dùng để chờ response headers.
+    // Sau khi fetch đã kết nối thì bỏ timeout,
+    // không được abort giữa bài hát.
+    clearTimeout(
+      timer
+    );
 
 
     console.log(
@@ -1823,14 +2119,12 @@ async function streamAudiusTrack(
       upstream.status
     );
 
-
     console.log(
       "[AUDIUS FETCH] Type:",
       upstream.headers.get(
         "content-type"
       )
     );
-
 
     console.log(
       "[AUDIUS FETCH] Length:",
@@ -1844,9 +2138,11 @@ async function streamAudiusTrack(
       !upstream.ok ||
       !upstream.body
     ) {
+
       console.error(
         "[AUDIUS FETCH] FAILED AFTER PROBE"
       );
+
 
       return res
         .status(502)
@@ -1932,349 +2228,21 @@ async function streamAudiusTrack(
     );
 
 
-    let audioStarted = false;
+    let audioStarted =
+      false;
 
 
     ffmpeg.stdout.on(
       "data",
       () => {
-        if (!audioStarted) {
-          audioStarted = true;
-
-          console.log(
-            "[FFMPEG AUDIUS] Audio stream started"
-          );
-        }
-      }
-    );
-
-
-    ffmpeg.stdout.pipe(
-      res
-    );
-
-
-    ffmpeg.stderr.on(
-      "data",
-      data => {
-        console.error(
-          "[FFMPEG AUDIUS STDERR]",
-          data
-            .toString()
-            .trim()
-        );
-      }
-    );
-
-
-    ffmpeg.on(
-      "error",
-      err => {
-        console.error(
-          "[FFMPEG AUDIUS ERROR]",
-          err
-        );
-      }
-    );
-
-
-    ffmpeg.on(
-      "exit",
-      (
-        code,
-        signal
-      ) => {
-        console.log(
-          "[FFMPEG AUDIUS] EXIT",
-          "code =",
-          code,
-          "signal =",
-          signal
-        );
-      }
-    );
-
-
-    ffmpeg.on(
-      "close",
-      (
-        code,
-        signal
-      ) => {
-        console.log(
-          "[FFMPEG AUDIUS] CLOSE",
-          "code =",
-          code,
-          "signal =",
-          signal
-        );
 
         if (
-          !res.writableEnded
+          !audioStarted
         ) {
-          res.end();
-        }
-      }
-    );
 
+          audioStarted =
+            true;
 
-    // ========================================================
-    // AUDIUS -> FFMPEG STDIN
-    // ========================================================
-
-    const reader =
-      upstream.body.getReader();
-
-
-    try {
-      while (true) {
-        const {
-          done,
-          value
-        } =
-          await reader.read();
-
-
-        if (done) {
-          console.log(
-            "[AUDIUS FETCH] Stream finished"
-          );
-
-          ffmpeg.stdin.end();
-
-          break;
-        }
-
-
-        const buffer =
-          Buffer.from(
-            value
-          );
-
-
-        const writable =
-          ffmpeg.stdin.write(
-            buffer
-          );
-
-
-        if (!writable) {
-          await new Promise(
-            resolve => {
-              ffmpeg.stdin.once(
-                "drain",
-                resolve
-              );
-            }
-          );
-        }
-      }
-
-    } catch (err) {
-      console.error(
-        "[AUDIUS PIPE ERROR]",
-        err
-      );
-
-      if (
-        !ffmpeg.stdin.destroyed
-      ) {
-        ffmpeg.stdin.destroy();
-      }
-    }
-
-  } catch (err) {
-    console.error(
-      "[AUDIUS AUDIO ERROR]",
-      err
-    );
-
-    if (!res.headersSent) {
-      return res
-        .status(502)
-        .send(
-          "Audius audio error"
-        );
-    }
-
-    res.end();
-  }
-}
-
-  const sourceUrl =
-    `https://api.audius.co/v1/tracks/${encodeURIComponent(track.id)}/stream`;
-
-
-  console.log(
-    "[AUDIUS AUDIO] ID    :",
-    track.id
-  );
-
-
-  console.log(
-    "[AUDIUS AUDIO] Title :",
-    track.title
-  );
-
-
-  console.log(
-    "[AUDIUS AUDIO] Source:",
-    sourceUrl
-  );
-
-
-  try {
-
-    // ========================================================
-    // NODE FETCHES AUDIUS
-    // ========================================================
-
-    const upstream =
-      await fetch(
-        sourceUrl,
-        {
-          redirect:
-            "follow",
-
-          headers: {
-            Accept:
-              "*/*",
-
-            "User-Agent":
-              "YN-Music-Server/5.3"
-          }
-        }
-      );
-
-
-    console.log(
-      "[AUDIUS FETCH] HTTP:",
-      upstream.status
-    );
-
-
-    console.log(
-      "[AUDIUS FETCH] Type:",
-      upstream.headers.get(
-        "content-type"
-      )
-    );
-
-
-    console.log(
-      "[AUDIUS FETCH] Length:",
-      upstream.headers.get(
-        "content-length"
-      )
-    );
-
-
-    if (
-      !upstream.ok ||
-      !upstream.body
-    ) {
-
-      console.error(
-        "[AUDIUS FETCH] FAILED"
-      );
-
-
-      return res
-        .status(502)
-        .send(
-          "Audius stream failed"
-        );
-    }
-
-
-    // ========================================================
-    // RESPONSE TO ESP32
-    // ========================================================
-
-    res.status(200);
-
-
-    res.setHeader(
-      "Content-Type",
-      "audio/mpeg"
-    );
-
-
-    res.setHeader(
-      "Cache-Control",
-      "no-cache"
-    );
-
-
-    // ========================================================
-    // FFMPEG
-    // ========================================================
-
-    const args = [
-      "-hide_banner",
-
-      "-loglevel",
-      "error",
-
-      "-i",
-      "pipe:0",
-
-      "-vn",
-
-      "-ac",
-      "1",
-
-      "-ar",
-      "24000",
-
-      "-b:a",
-      "32k",
-
-      "-codec:a",
-      "libmp3lame",
-
-      "-f",
-      "mp3",
-
-      "pipe:1"
-    ];
-
-
-    console.log(
-      "[FFMPEG AUDIUS] Starting via stdin..."
-    );
-
-
-    const ffmpeg =
-      spawn(
-        ffmpegPath,
-        args,
-        {
-          stdio: [
-            "pipe",
-            "pipe",
-            "pipe"
-          ]
-        }
-      );
-
-
-    console.log(
-      "[FFMPEG AUDIUS] PID:",
-      ffmpeg.pid
-    );
-
-
-    let started = false;
-
-
-    ffmpeg.stdout.on(
-      "data",
-      () => {
-
-        if (!started) {
-
-          started = true;
 
           console.log(
             "[FFMPEG AUDIUS] Audio stream started"
@@ -2311,6 +2279,18 @@ async function streamAudiusTrack(
           "[FFMPEG AUDIUS ERROR]",
           err
         );
+
+
+        if (
+          !res.headersSent
+        ) {
+
+          res
+            .status(502)
+            .send(
+              "FFmpeg Audius error"
+            );
+        }
       }
     );
 
@@ -2352,6 +2332,7 @@ async function streamAudiusTrack(
         if (
           !res.writableEnded
         ) {
+
           res.end();
         }
       }
@@ -2363,7 +2344,8 @@ async function streamAudiusTrack(
     // ========================================================
 
     const reader =
-      upstream.body.getReader();
+      upstream.body
+        .getReader();
 
 
     try {
@@ -2384,7 +2366,13 @@ async function streamAudiusTrack(
           );
 
 
-          ffmpeg.stdin.end();
+          if (
+            !ffmpeg.stdin.destroyed
+          ) {
+
+            ffmpeg.stdin.end();
+          }
+
 
           break;
         }
@@ -2446,13 +2434,17 @@ async function streamAudiusTrack(
       !res.headersSent
     ) {
 
-      res
+      return res
         .status(502)
         .send(
           "Audius audio error"
         );
+    }
 
-    } else {
+
+    if (
+      !res.writableEnded
+    ) {
 
       res.end();
     }
@@ -2464,7 +2456,9 @@ async function streamAudiusTrack(
 // TEST ONLINE SEARCH
 //
 // Browser:
+//
 // /test-online-search?song=Lac%20Troi&artist=Son%20Tung
+//
 // ============================================================
 
 app.get(
@@ -2630,7 +2624,7 @@ app.listen(
   () => {
 
     console.log(
-      `YN Music Server V5.3.1 running on port ${PORT}`
+      `YN Music Server V5.3.1 CLEAN running on port ${PORT}`
     );
 
 
@@ -2641,6 +2635,11 @@ app.listen(
 
     console.log(
       "[SEARCH] Local -> Audius Smart Ranking"
+    );
+
+
+    console.log(
+      "[FALLBACK] Audius Auto Fallback enabled"
     );
 
 
