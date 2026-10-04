@@ -2446,19 +2446,13 @@ setInterval(
 // ============================================================
 // ROUTES READY
 // ============================================================
-
 console.log(
-  "[ROUTE] /stream_pcm registered"
+  "[ROUTE] /test-jamendo-search registered"
 );
 
 console.log(
-  "[ROUTE] /audio/:token.mp3 registered"
+  "[ROUTE] /test-jamendo-play/:id registered"
 );
-
-console.log(
-  "[ROUTE] /test-online-search registered"
-);
-
 
 // ============================================================
 // START SERVER
