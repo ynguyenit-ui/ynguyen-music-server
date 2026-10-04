@@ -3217,6 +3217,252 @@ app.get("/test-audius-multisearch", async (req, res) => {
   }
 });
 // ============================================================
+// V5.4B TEST - LOCAL MUSIC AUTO SCAN
+//
+// Test:
+// /test-local-scan
+// ============================================================
+
+function scanLocalMusic() {
+
+  const musicDir =
+    path.join(
+      process.cwd(),
+      "music"
+    );
+
+  console.log(
+    "\n===================================="
+  );
+
+  console.log(
+    "[LOCAL SCAN] Folder:",
+    musicDir
+  );
+
+
+  if (
+    !fs.existsSync(musicDir)
+  ) {
+
+    console.log(
+      "[LOCAL SCAN] music folder not found"
+    );
+
+    return [];
+  }
+
+
+  const supportedExtensions =
+    new Set([
+      ".mp3",
+      ".m4a",
+      ".aac",
+      ".wav",
+      ".flac",
+      ".ogg",
+      ".opus"
+    ]);
+
+
+  const files =
+    fs.readdirSync(
+      musicDir,
+      {
+        withFileTypes: true
+      }
+    );
+
+
+  const tracks = [];
+
+
+  for (const file of files) {
+
+    // Bước test hiện tại:
+    // chỉ scan file nằm trực tiếp trong music/
+    if (!file.isFile()) {
+      continue;
+    }
+
+
+    const ext =
+      path.extname(
+        file.name
+      ).toLowerCase();
+
+
+    if (
+      !supportedExtensions.has(ext)
+    ) {
+      continue;
+    }
+
+
+    const baseName =
+      path.basename(
+        file.name,
+        ext
+      );
+
+
+    // ----------------------------------------
+    // PARSE:
+    //
+    // Artist - Title.mp3
+    //
+    // Ví dụ:
+    // Son Tung M-TP - Lac Troi.mp3
+    // ----------------------------------------
+
+    let artist = "";
+    let title = baseName;
+
+
+    // Chỉ coi " - " có khoảng trắng hai bên
+    // là dấu phân cách Artist - Title.
+    //
+    // Điều này tránh phá tên:
+    // Son Tung M-TP
+    const separator =
+      baseName.indexOf(" - ");
+
+
+    if (separator > 0) {
+
+      artist =
+        baseName
+          .slice(
+            0,
+            separator
+          )
+          .trim();
+
+
+      title =
+        baseName
+          .slice(
+            separator + 3
+          )
+          .trim();
+    }
+
+
+    const relativeFile =
+      path
+        .join(
+          "music",
+          file.name
+        )
+        .replace(
+          /\\/g,
+          "/"
+        );
+
+
+    tracks.push({
+
+      title,
+
+      artist,
+
+      file:
+        relativeFile,
+
+      filename:
+        file.name,
+
+      extension:
+        ext,
+
+      normalized_title:
+        normalize(title),
+
+      normalized_artist:
+        normalize(artist)
+
+    });
+  }
+
+
+  tracks.sort(
+    (a, b) =>
+      a.title.localeCompare(
+        b.title
+      )
+  );
+
+
+  console.log(
+    "[LOCAL SCAN] Found:",
+    tracks.length,
+    "audio files"
+  );
+
+
+  for (const track of tracks) {
+
+    console.log(
+      "[LOCAL SCAN]",
+      track.artist
+        ? `${track.artist} - ${track.title}`
+        : track.title
+    );
+  }
+
+
+  return tracks;
+}
+
+
+// ============================================================
+// TEST ROUTE
+// ============================================================
+
+app.get(
+  "/test-local-scan",
+  (req, res) => {
+
+    try {
+
+      const tracks =
+        scanLocalMusic();
+
+
+      return res.json({
+
+        version:
+          "5.4B-test",
+
+        folder:
+          "music",
+
+        count:
+          tracks.length,
+
+        tracks
+
+      });
+
+
+    } catch (err) {
+
+      console.error(
+        "[LOCAL SCAN ERROR]",
+        err
+      );
+
+
+      return res
+        .status(500)
+        .json({
+          error:
+            String(err)
+        });
+    }
+  }
+);
+// ============================================================
 // TOKEN CLEANUP
 // ============================================================
 
@@ -3273,6 +3519,9 @@ console.log(
 );
 console.log(
   "[ROUTE] /test-audius-multisearch registered"
+);
+console.log(
+  "[ROUTE] /test-local-scan registered"
 );
 // ============================================================
 // START SERVER
